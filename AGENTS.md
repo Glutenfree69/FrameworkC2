@@ -8,11 +8,14 @@ This file serves as the primary instruction set for AI agents (specifically Jule
     - Code should be clear, well-structured, and idiomatic.
     - Complex logic should be explained in comments or documentation.
     - Avoid "magic" code; prefer explicit implementations that demonstrate the underlying mechanics.
-2.  **Incremental Evolution**:
-    - Do not generate massive blocks of code at once.
-    - Propose small, digestible changes (one feature or refactor per session).
-    - Allow the user to understand *why* a change is being made.
-3.  **Strict Quality**:
+2.  **Research-Driven**:
+    - **Benchmark**: Before implementing a feature, ALWAYS research how it is handled in established frameworks (e.g., **Sliver**, **Cobalt Strike**, **Mythic**, **Havoc**).
+    - **Adapt**: Implement a simplified but architecturally accurate version of these standard mechanisms.
+3.  **Incremental & Flexible**:
+    - Propose meaningful changes.
+    - **Batching**: You may implement multiple small fixes or refactors in a single session if they are low-risk and related.
+    - For major features, stick to one per session to keep it digestible.
+4.  **Strict Quality**:
     - **Type Safety**: Use `mypy` strict standards. No `Any` without a very good reason.
     - **Linting**: Follow `ruff`/PEP 8 standards.
     - **Documentation**: Keep READMEs and docstrings up to date.
@@ -33,8 +36,7 @@ This file serves as the primary instruction set for AI agents (specifically Jule
 
 ### When Implementing Features
 - **Plan First**: Always analyze the current state before coding.
-- **Small Batches**: Don't implement the entire roadmap in one go. Pick the next logical step.
-- **User Confirmation**: If a change is significant, explain the plan and ask for confirmation (unless running in an autonomous scheduled mode where the plan is implicit).
+- **Research**: Use the `google_search` tool (or similar) to understand how Sliver/Cobalt Strike implements the feature.
 
 ## 🗺 Roadmap
 
