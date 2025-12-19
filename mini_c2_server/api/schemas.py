@@ -22,7 +22,12 @@ class CheckInResponse(BaseModel):
 
 class TaskResponse(BaseModel):
     # Optional[str] veut dire : soit un texte, soit None (rien)
+    task_id: Optional[int] = None
     command: Optional[str] = None 
+
+class TaskResult(BaseModel):
+    task_id: int
+    result: str
 
 class AdminTaskResponse(BaseModel):
     status: str
