@@ -10,6 +10,7 @@ Ce projet est un serveur de **Command & Control (C2)** minimaliste développé e
 
 - **Check-in** : Enregistrement des nouveaux agents (UUID, IP, User, OS)
 - **Polling** : Les agents viennent récupérer leurs tâches périodiquement ("Beaconing")
+- **Persistance** : Utilisation de **SQLModel (SQLite)** pour stocker les agents et les tâches.
 - **Queueing** : Système de file d'attente FIFO (First-In-First-Out) pour les commandes
 - **Strict Typing** : Utilisation intensive de Pydantic pour garantir l'intégrité et la validation des données échangées
 
@@ -30,6 +31,11 @@ cd mini_c2_server
 ```bash
 uv sync
 ```
+ou via pip :
+```bash
+pip install -r requirements.txt
+```
+(Si `requirements.txt` n'existe pas, `pip install fastapi uvicorn sqlmodel`)
 
 ---
 
@@ -40,9 +46,14 @@ Pour démarrer le serveur en mode développement (avec rechargement automatique 
 ```bash
 uv run uvicorn main:app --reload
 ```
+ou simplement :
+```bash
+uvicorn main:app --reload
+```
 
 - **Serveur** : `http://127.0.0.1:8000`
 - Les logs d'accès s'affichent directement dans le terminal
+- Une base de données `database.db` sera créée automatiquement au premier lancement.
 
 ---
 
@@ -81,7 +92,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/admin/tasks" \
      -d '{"agent_id": "COLLER_UUID_ICI", "command": "whoami"}'
 ```
 
-L'agent récupérera cette commande lors de son prochain "réveil" (Beacon).
+L'agent récupérera cette commande lors de son prochain "réveil" (Beacon) et renverra le résultat, qui sera stocké en base de données.
 
 ---
 
@@ -89,10 +100,11 @@ L'agent récupérera cette commande lors de son prochain "réveil" (Beacon).
 
 ```
 mini_c2_server/
-├── main.py          # Point d'entrée, logique des routes et stockage mémoire
-├── pyproject.toml   # Configuration du projet et dépendances (géré par uv)
-├── .venv/           # Environnement virtuel (géré par uv)
+├── main.py          # Point d'entrée, logique des routes
+├── pyproject.toml   # Configuration du projet et dépendances
+├── core/
+│   ├── database.py  # Configuration de la DB (SQLite)
+│   └── models.py    # Modèles SQLModel (Tables Agent et Task)
 └── api/
-    ├── __init__.py
     └── schemas.py   # Modèles Pydantic (le contrat de données strict)
 ```

