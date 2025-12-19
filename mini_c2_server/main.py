@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -48,7 +48,7 @@ async def agent_checkin(data: AgentCheckIn, session: Session = Depends(get_sessi
         agent.username = data.username
         agent.internal_ip = data.internal_ip
         agent.os_version = data.os_version
-        session.add(agent)
+        # session.add(agent) is not needed for updates on attached objects
     
     session.commit()
     session.refresh(agent)
@@ -60,7 +60,7 @@ async def agent_checkin(data: AgentCheckIn, session: Session = Depends(get_sessi
 async def get_tasks(agent_id: str, session: Session = Depends(get_session)) -> TaskResponse:
 
     # Get pending tasks for this agent
-    statement = select(Task).where(Task.agent_id == agent_id, Task.status == "pending").order_by(Task.created_at)  # type: ignore # Mypy sees datetime
+    statement = select(Task).where(Task.agent_id == agent_id, Task.status == "pending").order_by(Task.created_at)  # type: ignore # mypy sees datetime
     results = session.exec(statement)
     task = results.first()
     
@@ -68,11 +68,11 @@ async def get_tasks(agent_id: str, session: Session = Depends(get_session)) -> T
         print(f"📤 ENVOI: '{task.command}' -> {agent_id}")
         # Mark as sent
         task.status = "sent"
-        session.add(task)
+        # session.add(task) is not needed for updates
         session.commit()
         return TaskResponse(task_id=task.id, command=task.command)
 
-    return TaskResponse(command=None)
+    return TaskResponse(task_id=None, command=None)
 
 # 3. Post Results
 @app.post("/api/v1/results", response_model=dict)
@@ -85,7 +85,7 @@ async def post_results(result: TaskResult, session: Session = Depends(get_sessio
     task.status = "completed"
     task.executed_at = datetime.now(timezone.utc)
 
-    session.add(task)
+    # session.add(task) is not needed for updates
     session.commit()
 
     print(f"📥 RÉSULTAT REÇU pour Tâche #{task.id}")
@@ -110,8 +110,9 @@ async def add_task(task_req: TaskRequest, session: Session = Depends(get_session
     session.refresh(new_task)
     
     # Calculate position (count pending tasks for this agent, including the one just added)
-    statement = select(Task).where(Task.agent_id == task_req.agent_id, Task.status == "pending")
-    pending_count = len(session.exec(statement).all())
+    # Using func.count() is more efficient than fetching all records
+    statement = select(func.count()).where(Task.agent_id == task_req.agent_id, Task.status == "pending")
+    pending_count = session.exec(statement).one()
     
     print(f"✅ TÂCHE AJOUTÉE: '{task_req.command}' (ID: {new_task.id})")
 

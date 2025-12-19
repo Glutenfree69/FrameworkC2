@@ -11,6 +11,7 @@ from typing import Optional
 # --- CONFIGURATION ---
 SERVER_URL = "http://127.0.0.1:8000"
 SLEEP_TIME = 5
+CMD_TIMEOUT = 30
 
 # --- LE CONTRAT (Copié du serveur pour être strict) ---
 
@@ -63,7 +64,7 @@ def execute_command(command: str) -> str:
             shell=True,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=CMD_TIMEOUT
         )
 
         stdout = result.stdout.strip()
@@ -123,12 +124,15 @@ def main():
                 # Envoi du résultat
                 result_data = TaskResult(task_id=task_data.task_id, result=output)
 
-                post_resp = requests.post(
-                    f"{SERVER_URL}/api/v1/results",
-                    json=result_data.model_dump()
-                )
-                post_resp.raise_for_status()
-                print(f"📤 Résultat envoyé.")
+                try:
+                    post_resp = requests.post(
+                        f"{SERVER_URL}/api/v1/results",
+                        json=result_data.model_dump()
+                    )
+                    post_resp.raise_for_status()
+                    print(f"📤 Résultat envoyé.")
+                except Exception as e:
+                     print(f"⚠️ Erreur lors de l'envoi du résultat : {e}")
 
             else:
                 print("ø Rien à faire.")
