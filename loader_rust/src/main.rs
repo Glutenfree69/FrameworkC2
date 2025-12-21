@@ -211,7 +211,7 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
 fn main() {
     println!(r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║  🦀 CALC LOADER v2 - Direct Syscalls + XOR + RW→RX 🦀    ║
+    ║  🦀 CALC LOADER v2 - Direct Syscalls + XOR + RW→RX 🦀     ║
     ║                                                           ║
     ║  Improvements:                                            ║
     ║  ✓ XOR encrypted shellcode (anti-signature)               ║
