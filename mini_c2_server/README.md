@@ -12,6 +12,7 @@ Ce projet est un serveur de **Command & Control (C2)** minimaliste développé e
 - **Polling** : Les agents viennent récupérer leurs tâches périodiquement ("Beaconing")
 - **Queueing** : Système de file d'attente FIFO (First-In-First-Out) pour les commandes
 - **Strict Typing** : Utilisation intensive de Pydantic pour garantir l'intégrité et la validation des données échangées
+- **Persistance SQLite** : Base de données locale pour conserver agents et tâches entre les redémarrages
 
 ---
 
@@ -42,6 +43,7 @@ uv run uvicorn main:app --reload
 ```
 
 - **Serveur** : `http://127.0.0.1:8000`
+- **Base de données** : `c2.db` (créée automatiquement au premier lancement)
 - Les logs d'accès s'affichent directement dans le terminal
 
 ---
@@ -54,6 +56,35 @@ Grâce à FastAPI, une documentation interactive est générée automatiquement.
 |-----------|-----|
 | **Swagger UI** (Test des routes) | http://127.0.0.1:8000/docs |
 | **ReDoc** (Lecture seule) | http://127.0.0.1:8000/redoc |
+
+---
+
+## 🗄️ Base de Données
+
+Le serveur utilise **SQLite** avec **SQLAlchemy async** pour persister les données.
+
+### Tables
+
+| Table | Description |
+|-------|-------------|
+| `agents` | Agents enregistrés (id, hostname, username, IP, OS, timestamps) |
+| `tasks` | File de commandes par agent (command, status, timestamps) |
+
+### Inspecter la DB
+
+```bash
+# Lister les tables
+sqlite3 c2.db ".tables"
+
+# Voir les agents enregistrés
+sqlite3 c2.db "SELECT id, hostname, username, last_seen FROM agents;"
+
+# Voir les tâches
+sqlite3 c2.db "SELECT id, agent_id, command, status FROM tasks;"
+
+# Supprimer la DB pour repartir de zéro
+rm c2.db
+```
 
 ---
 
@@ -89,10 +120,15 @@ L'agent récupérera cette commande lors de son prochain "réveil" (Beacon).
 
 ```
 mini_c2_server/
-├── main.py          # Point d'entrée, logique des routes et stockage mémoire
-├── pyproject.toml   # Configuration du projet et dépendances (géré par uv)
-├── .venv/           # Environnement virtuel (géré par uv)
-└── api/
+├── main.py              # Point d'entrée FastAPI + routes
+├── pyproject.toml       # Dépendances (FastAPI, SQLAlchemy, aiosqlite)
+├── c2.db                # Base SQLite (générée au runtime)
+├── api/
+│   ├── __init__.py
+│   └── schemas.py       # Modèles Pydantic (validation API)
+└── core/
     ├── __init__.py
-    └── schemas.py   # Modèles Pydantic (le contrat de données strict)
+    ├── database.py      # Configuration SQLAlchemy async
+    ├── models.py        # Modèles ORM (tables Agent, Task)
+    └── crud.py          # Opérations CRUD async
 ```
