@@ -60,6 +60,10 @@ class Task(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Relation vers l'agent
     agent: Mapped["Agent"] = relationship("Agent", back_populates="tasks")

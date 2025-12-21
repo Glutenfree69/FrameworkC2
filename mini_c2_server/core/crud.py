@@ -127,3 +127,31 @@ async def get_task_queue_position(db: AsyncSession, agent_id: str) -> int:
         select(Task).where(Task.agent_id == agent_id, Task.status == "pending")
     )
     return len(list(result.scalars().all()))
+
+
+async def update_task_result(
+    db: AsyncSession,
+    task_id: int,
+    agent_id: str,
+    result: str,
+    success: bool = True,
+) -> Optional[Task]:
+    """
+    Met à jour le résultat d'une tâche exécutée par l'agent.
+    
+    Returns:
+        Task | None: La tâche mise à jour, ou None si non trouvée.
+    """
+    query_result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.agent_id == agent_id)
+    )
+    task = query_result.scalar_one_or_none()
+    
+    if task:
+        task.status = "completed" if success else "failed"
+        task.completed_at = utc_now()
+        task.result = result
+        await db.commit()
+        await db.refresh(task)
+    
+    return task

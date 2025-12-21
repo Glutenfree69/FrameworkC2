@@ -14,6 +14,12 @@ class TaskRequest(BaseModel):
     agent_id: str
     command: str
 
+class TaskResultRequest(BaseModel):
+    agent_id: str
+    task_id: int
+    result: str
+    success: bool = True
+
 # --- RÉPONSES (Ce que l'on renvoie) ---
 
 class CheckInResponse(BaseModel):
@@ -22,7 +28,12 @@ class CheckInResponse(BaseModel):
 
 class TaskResponse(BaseModel):
     # Optional[str] veut dire : soit un texte, soit None (rien)
+    task_id: Optional[int] = None
     command: Optional[str] = None 
+
+class TaskResultResponse(BaseModel):
+    status: str
+    message: str
 
 class AdminTaskResponse(BaseModel):
     status: str

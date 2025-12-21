@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas import (
     AgentCheckIn, 
     TaskRequest, 
+    TaskResultRequest,
     CheckInResponse, 
     TaskResponse, 
+    TaskResultResponse,
     AdminTaskResponse
 )
 from core.database import get_db, init_db
@@ -17,6 +19,7 @@ from core.crud import (
     get_pending_task,
     create_task,
     get_task_queue_position,
+    update_task_result,
 )
 
 
@@ -64,9 +67,9 @@ async def get_tasks(
     
     if task:
         print(f"📤 ENVOI: '{task.command}' -> {agent_id}")
-        return TaskResponse(command=task.command)
+        return TaskResponse(task_id=task.id, command=task.command)
 
-    return TaskResponse(command=None)
+    return TaskResponse(task_id=None, command=None)
 
 
 # 3. Admin
@@ -86,3 +89,28 @@ async def add_task(
     print(f"✅ TÂCHE AJOUTÉE: '{task.command}'")
 
     return AdminTaskResponse(status="queued", position=position)
+
+
+# 4. Task Result (Agent sends back command output)
+@app.post("/api/v1/tasks/result", response_model=TaskResultResponse)
+async def submit_task_result(
+    data: TaskResultRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TaskResultResponse:
+    
+    task = await update_task_result(
+        db=db,
+        task_id=data.task_id,
+        agent_id=data.agent_id,
+        result=data.result,
+        success=data.success,
+    )
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    status = "completed" if data.success else "failed"
+    print(f"📥 RÉSULTAT [{status}]: Task #{data.task_id}")
+    print(f"   └─ {data.result[:100]}{'...' if len(data.result) > 100 else ''}")
+
+    return TaskResultResponse(status="received", message=f"Task #{data.task_id} marked as {status}")
