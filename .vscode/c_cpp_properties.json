@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "Win64 Cross",
+            "includePath": [
+                "/opt/homebrew/Cellar/mingw-w64/*/toolchain-x86_64/x86_64-w64-mingw32/include"
+            ],
+            "defines": ["_WIN64", "_WIN32"],
+            "compilerPath": "/opt/homebrew/bin/x86_64-w64-mingw32-gcc",
+            "cStandard": "c17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}

