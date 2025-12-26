@@ -23,6 +23,7 @@ winapi = { version = "0.3.9", features = [
     "synchapi",
     "winbase",        # Pour INFINITE
     "ntstatus",       # Pour STATUS_SUCCESS
+    "tlhelp32"
 ] }
 
 [profile.release]
