@@ -510,22 +510,22 @@ fn main() {
     println!(
         r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║  🦀 REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition 🦀  ║
+    ║   REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition        ║
     ║                                                           ║
     ║  Techniques:                                              ║
-    ║  ✓ Reflective DLL Injection (ReflectiveLdr)              ║
-    ║  ✓ PE Parsing (find ReflectiveLoader export)             ║
-    ║  ✓ Process injection into existing RuntimeBroker.exe     ║
+    ║  ✓ Reflective DLL Injection (ReflectiveLdr)               ║
+    ║  ✓ PE Parsing (find ReflectiveLoader export)              ║
+    ║  ✓ Process injection into existing RuntimeBroker.exe      ║
     ║  ✓ Indirect syscalls                                      ║
-    ║  ✓ Minimum rights (0x002A)                               ║
-    ║  ✓ RW → RX memory protection                             ║
+    ║  ✓ Minimum rights (0x002A)                                ║
+    ║  ✓ RW → RX memory protection                              ║
     ║                                                           ║
     ║  Syscalls used:                                           ║
-    ║  • NtOpenProcess        • NtProtectVirtualMemory         ║
-    ║  • NtAllocateVirtualMemory  • NtCreateThreadEx           ║
-    ║  • NtWriteVirtualMemory     • NtClose                    ║
+    ║  • NtOpenProcess        • NtProtectVirtualMemory          ║
+    ║  • NtAllocateVirtualMemory  • NtCreateThreadEx            ║
+    ║  • NtWriteVirtualMemory     • NtClose                     ║
     ║                                                           ║
-    ║  ⚠️  FOR EDUCATIONAL PURPOSES ONLY                        ║
+    ║    FOR EDUCATIONAL PURPOSES ONLY                          ║
     ╚═══════════════════════════════════════════════════════════╝
     "#
     );

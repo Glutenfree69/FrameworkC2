@@ -27,7 +27,7 @@ reflective_dll/
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         LOADER RUST                                      │
+│                         LOADER RUST                                     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  1. Lit evil.dll (bytes bruts)                                          │
 │  2. Parse le PE pour trouver l'export "ReflectiveLoader"                │
@@ -41,7 +41,7 @@ reflective_dll/
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    DANS LE PROCESS CIBLE                                 │
+│                    DANS LE PROCESS CIBLE                                │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  ReflectiveLoader(lpParameter = base_address):                          │
 │    1. Utilise lpParameter comme adresse de base de la DLL               │
@@ -54,9 +54,9 @@ reflective_dll/
 │       d. Résout les imports (LoadLibraryA, GetProcAddress)              │
 │       e. Applique les relocations                                       │
 │       f. Appelle DllMain(DLL_PROCESS_ATTACH)                            │
-│                         │                                                │
-│                         ▼                                                │
-│               Ta payload s'exécute !                                     │
+│                         │                                               │
+│                         ▼                                               │
+│               Ta payload s'exécute !                                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 

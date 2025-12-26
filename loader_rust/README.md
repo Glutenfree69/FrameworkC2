@@ -38,18 +38,18 @@ Un **processus** est un container isolé qui contient :
 ┌─────────────────────────────────────────────────────────┐
 │                    PROCESSUS                            │
 ├─────────────────────────────────────────────────────────┤
-│  📦 Espace d'adressage virtuel (mémoire privée)        │
-│     └── 0x00000000 → 0x7FFFFFFF (user space)           │
+│  📦 Espace d'adressage virtuel (mémoire privée)         │
+│     └── 0x00000000 → 0x7FFFFFFF (user space)            │
 │                                                         │
-│  🔑 Handle Table (accès aux ressources kernel)         │
-│     └── Fichiers, registry, events, autres process...  │
+│  🔑 Handle Table (accès aux ressources kernel)          │
+│     └── Fichiers, registry, events, autres process...   │
 │                                                         │
-│  🎫 Token de sécurité (identité + privilèges)          │
+│  🎫 Token de sécurité (identité + privilèges)           │
 │                                                         │
-│  📊 PEB (Process Environment Block)                    │
-│     └── Liste des DLLs chargées, arguments, env vars   │
+│  📊 PEB (Process Environment Block)                     │
+│     └── Liste des DLLs chargées, arguments, env vars    │
 │                                                         │
-│  🧵 Thread(s)                                          │
+│  🧵 Thread(s)                                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -78,17 +78,17 @@ Un **thread** est une unité d'exécution :
 │              PROCESSUS (RuntimeBroker.exe)               │
 │                                                          │
 │   Mémoire partagée entre tous les threads :              │
-│   ┌────────────────────────────────────────────┐        │
-│   │  Code (.text)  │  Data (.data)  │  Heap    │        │
-│   └────────────────────────────────────────────┘        │
+│   ┌────────────────────────────────────────────┐         │
+│   │  Code (.text)  │  Data (.data)  │  Heap    │         │
+│   └────────────────────────────────────────────┘         │
 │              ↑              ↑             ↑              │
 │              │              │             │              │
-│   ┌──────────┴───┐  ┌──────┴──────┐  ┌───┴────────┐    │
-│   │  Thread 1    │  │  Thread 2   │  │  Thread 3  │    │
-│   │  (UWP perms) │  │  (autre)    │  │  (TON      │    │
-│   │              │  │             │  │  CODE)     │    │
-│   │  Stack 1     │  │  Stack 2    │  │  Stack 3   │    │
-│   └──────────────┘  └─────────────┘  └────────────┘    │
+│   ┌──────────┴───┐  ┌──────┴──────┐  ┌───┴────────┐      │
+│   │  Thread 1    │  │  Thread 2   │  │  Thread 3  │      │
+│   │  (UWP perms) │  │  (autre)    │  │  (TON      │      │
+│   │              │  │             │  │  CODE)     │      │
+│   │  Stack 1     │  │  Stack 2    │  │  Stack 3   │      │
+│   └──────────────┘  └─────────────┘  └────────────┘      │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -141,16 +141,16 @@ Un **handle** est une "télécommande" vers un objet kernel, pas l'objet lui-mê
 ┌─────────────────────────────────────────────────────────────┐
 │                  RUNTIMEBROKER.EXE                          │
 │                                                             │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
-│   │  Thread 1   │    │  Thread 2   │    │  Thread 3   │    │
-│   │  (UWP)      │    │  (autre)    │    │ (TON CODE)  │    │
-│   │             │    │             │    │             │    │
-│   │  Running    │    │  Waiting    │    │  Running ✓  │    │
-│   └─────────────┘    └─────────────┘    └─────────────┘    │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+│   │  Thread 1   │    │  Thread 2   │    │  Thread 3   │     │
+│   │  (UWP)      │    │  (autre)    │    │ (TON CODE)  │     │
+│   │             │    │             │    │             │     │
+│   │  Running    │    │  Waiting    │    │  Running ✓  │     │
+│   └─────────────┘    └─────────────┘    └─────────────┘     │
 │                                              │              │
 │                                              ▼              │
-│                                      Exécute payload       │
-│                                      puis se termine       │
+│                                      Exécute payload        │
+│                                      puis se termine        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -329,12 +329,12 @@ Actions SUSPECTES (comportement de malware) :
 ┌─────────────────────────────────────────────────────────────┐
 │                   RuntimeBroker.exe                         │
 ├─────────────────────────────────────────────────────────────┤
-│  ✓ Toujours présent (2-5 instances minimum)                │
-│  ✓ Tourne sous le contexte USER (pas SYSTEM!)              │
-│  ✓ Pas besoin de droits admin pour l'ouvrir                │
-│  ✓ Pas surveillé par les EDR (low profile)                 │
-│  ✓ Si crash → Windows en respawn un autre                  │
-│  ✓ Gère les permissions UWP = activité normale             │
+│  ✓ Toujours présent (2-5 instances minimum)                 │
+│  ✓ Tourne sous le contexte USER (pas SYSTEM!)               │
+│  ✓ Pas besoin de droits admin pour l'ouvrir                 │
+│  ✓ Pas surveillé par les EDR (low profile)                  │
+│  ✓ Si crash → Windows en respawn un autre                   │
+│  ✓ Gère les permissions UWP = activité normale              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -429,19 +429,19 @@ Le loader doit trouver l'offset de `ReflectiveLoader` dans la DLL :
 evil.dll (fichier brut):
 ┌─────────────────────────────────────────────────────────┐
 │ DOS Header                                              │
-│   └── e_lfanew → offset vers NT Headers                │
+│   └── e_lfanew → offset vers NT Headers                 │
 ├─────────────────────────────────────────────────────────┤
 │ NT Headers                                              │
-│   └── OptionalHeader.DataDirectories[0] → Export Dir   │
+│   └── OptionalHeader.DataDirectories[0] → Export Dir    │
 ├─────────────────────────────────────────────────────────┤
 │ Section Headers                                         │
 │   └── .text: VirtualAddress=0x1000, PointerToRawData=0x600 │
 ├─────────────────────────────────────────────────────────┤
 │ .text section (code)                                    │
-│   └── ReflectiveLoader() quelque part ici              │
+│   └── ReflectiveLoader() quelque part ici               │
 ├─────────────────────────────────────────────────────────┤
 │ Export Directory                                        │
-│   └── "ReflectiveLoader" → RVA 0x3075                  │
+│   └── "ReflectiveLoader" → RVA 0x3075                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
