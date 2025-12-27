@@ -1,7 +1,0 @@
-﻿.idea
-!data/*
-!example-output/*
-__pycache__
-*.asm
-*.c
-*.h
