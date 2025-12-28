@@ -111,7 +111,7 @@ sudo apt install mingw-w64  # Linux
 
 3. Génère les syscalls :
    ```cmd
-   python syswhispers.py --preset common -o ..\beacon\syscalls
+   python syswhispers.py --preset all --arch x64 --compiler msvc --method jumper_randomized -o ../beacon/syscalls/syscalls
    ```
 
 ---
