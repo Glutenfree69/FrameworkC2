@@ -8,7 +8,7 @@
 #include <windows.h>
 
 // Configuration
-#define SERVER_IP       "192.168.18.24"
+#define SERVER_IP       "172.31.39.182"
 #define SERVER_PORT     8000
 #define SLEEP_TIME_MS   5000
 
