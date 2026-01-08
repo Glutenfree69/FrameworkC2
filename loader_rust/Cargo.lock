@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "libc"
+version = "0.2.180"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
+
+[[package]]
 name = "ntapi"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15,15 +21,7 @@ dependencies = [
 name = "reflective_dll_loader"
 version = "0.1.0"
 dependencies = [
- "rust_syscalls",
- "winapi",
-]
-
-[[package]]
-name = "rust_syscalls"
-version = "0.1.0"
-source = "git+https://github.com/janoglezcampos/rust_syscalls#162451aaf095c8cb8c5e6b33ebf0bf44c62aca34"
-dependencies = [
+ "libc",
  "ntapi",
  "winapi",
 ]

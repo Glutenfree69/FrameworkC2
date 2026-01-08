@@ -9,22 +9,14 @@ description = "Educational shellcode loader using indirect syscalls + reflective
 # rustup default nightly
 
 [dependencies]
-# Librairie pour les syscalls directs/indirects
-# La feature "_DIRECT_" active les direct syscalls
-# Alternative: "_INDIRECT_" pour indirect syscalls
-rust_syscalls = { git = "https://github.com/janoglezcampos/rust_syscalls", features = ["_INDIRECT_"] }
+# Types NT (structures système)
+ntapi = "0.4"
 
-# Windows API bindings
-winapi = { version = "0.3.9", features = [
-    "memoryapi",
-    "processthreadsapi",
-    "errhandlingapi",
-    "handleapi",
-    "synchapi",
-    "winbase",        # Pour INFINITE
-    "ntstatus",       # Pour STATUS_SUCCESS
-    "tlhelp32"
-] }
+# Types C basiques
+libc = "0.2"
+
+# Winapi minimal pour types PE et NT (nécessaire pour resolve.rs et main.rs)
+winapi = { version = "0.3.9", features = ["ntdef", "winnt", "minwindef", "ntstatus"] }
 
 [profile.release]
 opt-level = "z"      # Optimise pour la taille
