@@ -179,8 +179,8 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
     unsafe {
         println!("[DEBUG] DLL size: {} bytes", dll_bytes.len());
 
-        // 1. DOS Header
-        let dos_header = &*(dll_bytes.as_ptr() as *const DosHeader);
+        // 1. DOS Header - utiliser read_unaligned pour éviter les problèmes d'alignement
+        let dos_header = std::ptr::read_unaligned(dll_bytes.as_ptr() as *const DosHeader);
         if dos_header.e_magic != 0x5A4D {
             return Err("Invalid DOS header".to_string());
         }
@@ -189,9 +189,10 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             dos_header.e_lfanew
         );
 
-        // 2. NT Headers
-        let nt_headers =
-            &*(dll_bytes.as_ptr().add(dos_header.e_lfanew as usize) as *const NtHeaders64);
+        // 2. NT Headers - utiliser read_unaligned
+        let nt_headers = std::ptr::read_unaligned(
+            dll_bytes.as_ptr().add(dos_header.e_lfanew as usize) as *const NtHeaders64
+        );
         if nt_headers.signature != 0x4550 {
             return Err("Invalid PE signature".to_string());
         }
@@ -201,18 +202,23 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             nt_headers.file_header.number_of_sections
         );
 
-        // 3. Get sections
+        // 3. Get sections - lire chaque section avec read_unaligned
         let sections_offset = dos_header.e_lfanew as usize
             + 4  // signature
             + std::mem::size_of::<FileHeader>()
             + nt_headers.file_header.size_of_optional_header as usize;
 
-        let sections = std::slice::from_raw_parts(
-            dll_bytes.as_ptr().add(sections_offset) as *const SectionHeader,
-            nt_headers.file_header.number_of_sections as usize,
-        );
+        let num_sections = nt_headers.file_header.number_of_sections as usize;
+        let mut sections = Vec::with_capacity(num_sections);
+        for i in 0..num_sections {
+            let section = std::ptr::read_unaligned(
+                dll_bytes.as_ptr().add(sections_offset + i * std::mem::size_of::<SectionHeader>())
+                    as *const SectionHeader
+            );
+            sections.push(section);
+        }
 
-        // 4. Export Directory
+        // 4. Export Directory - utiliser read_unaligned
         let export_dir_rva = nt_headers.optional_header.data_directories[0].virtual_address;
         if export_dir_rva == 0 {
             return Err("No export directory".to_string());
@@ -220,32 +226,33 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
         println!("[DEBUG] Export dir RVA: 0x{:X}", export_dir_rva);
 
         let export_dir_offset =
-            rva_to_offset(export_dir_rva, sections).ok_or("Failed to convert export dir RVA")?;
+            rva_to_offset(export_dir_rva, &sections).ok_or("Failed to convert export dir RVA")?;
         println!("[DEBUG] Export dir offset: 0x{:X}", export_dir_offset);
 
-        let export_dir =
-            &*(dll_bytes.as_ptr().add(export_dir_offset as usize) as *const ExportDirectory);
+        let export_dir = std::ptr::read_unaligned(
+            dll_bytes.as_ptr().add(export_dir_offset as usize) as *const ExportDirectory
+        );
         println!("[DEBUG] Number of names: {}", export_dir.number_of_names);
 
         // 5. Tables d'export
-        let names_offset = rva_to_offset(export_dir.address_of_names, sections)
+        let names_offset = rva_to_offset(export_dir.address_of_names, &sections)
             .ok_or("Failed to convert names RVA")?;
-        let functions_offset = rva_to_offset(export_dir.address_of_functions, sections)
+        let functions_offset = rva_to_offset(export_dir.address_of_functions, &sections)
             .ok_or("Failed to convert functions RVA")?;
-        let ordinals_offset = rva_to_offset(export_dir.address_of_name_ordinals, sections)
+        let ordinals_offset = rva_to_offset(export_dir.address_of_name_ordinals, &sections)
             .ok_or("Failed to convert ordinals RVA")?;
 
         // 6. Parcourir les exports pour trouver "ReflectiveLoader"
         for i in 0..export_dir.number_of_names {
-            // Lire le RVA du nom
+            // Lire le RVA du nom - utiliser read_unaligned pour u32
             let name_rva_ptr = dll_bytes
                 .as_ptr()
                 .add(names_offset as usize + (i * 4) as usize)
                 as *const u32;
-            let name_rva = *name_rva_ptr;
+            let name_rva = std::ptr::read_unaligned(name_rva_ptr);
 
             // Convertir RVA en offset
-            let name_offset = match rva_to_offset(name_rva, sections) {
+            let name_offset = match rva_to_offset(name_rva, &sections) {
                 Some(o) => o,
                 None => continue,
             };
@@ -259,24 +266,24 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             if name == "ReflectiveLoader" {
                 println!("[DEBUG] Found ReflectiveLoader at index {}", i);
 
-                // Trouver l'ordinal
+                // Trouver l'ordinal - utiliser read_unaligned pour u16
                 let ordinal_ptr = dll_bytes
                     .as_ptr()
                     .add(ordinals_offset as usize + (i * 2) as usize)
                     as *const u16;
-                let ordinal = *ordinal_ptr;
+                let ordinal = std::ptr::read_unaligned(ordinal_ptr);
 
-                // Trouver le RVA de la fonction
+                // Trouver le RVA de la fonction - utiliser read_unaligned pour u32
                 let func_rva_ptr = dll_bytes
                     .as_ptr()
                     .add(functions_offset as usize + (ordinal as usize * 4))
                     as *const u32;
-                let func_rva = *func_rva_ptr;
+                let func_rva = std::ptr::read_unaligned(func_rva_ptr);
 
                 println!("[DEBUG] Function RVA: 0x{:X}", func_rva);
 
                 // Convertir RVA en offset fichier car on injecte la DLL brute (pas mappée)!
-                let func_offset = rva_to_offset(func_rva, sections)
+                let func_offset = rva_to_offset(func_rva, &sections)
                     .ok_or("Failed to convert function RVA to file offset")?;
 
                 println!("[DEBUG] Function file offset: 0x{:X}", func_offset);
