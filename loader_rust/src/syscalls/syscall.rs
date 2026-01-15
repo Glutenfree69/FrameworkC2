@@ -67,10 +67,5 @@ skip:
 // Signature de la fonction assembleur
 #[cfg(target_arch = "x86_64")]
 extern "C" {
-    pub fn do_syscall(
-        ssn: u16,
-        syscall_addr: u64,
-        n_args: u32,
-        ...
-    ) -> i32;
+    pub fn do_syscall(ssn: u16, syscall_addr: u64, n_args: u32, ...) -> i32;
 }
