@@ -793,7 +793,7 @@ fn main() {
             debug_println!("[+] Found ReflectiveLoader at offset: 0x{:X}", offset);
             offset
         }
-        Err(e) => {
+        Err(_e) => {
             debug_eprintln!("[✗] Failed to parse DLL: {}", e);
             std::process::exit(1);
         }
@@ -825,7 +825,7 @@ fn main() {
             debug_println!("[✓] ReflectiveLoader → DllMain → Payload executed!");
             debug_println!("════════════════════════════════════════════");
         }
-        Err(e) => {
+        Err(_e) => {
             debug_eprintln!("\n[✗] ERROR: {}", e);
             std::process::exit(1);
         }
