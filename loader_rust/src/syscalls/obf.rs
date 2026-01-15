@@ -24,7 +24,7 @@ pub const fn djb2_hash(buffer: &[u8]) -> u32 {
             iter += 1;
             continue;
         }
-        if cur >= ('a' as u8) {
+        if cur >= b'a' {
             cur -= 0x20; // Uppercase
         }
         hsh = ((hsh << 5).wrapping_add(hsh)) + cur as u32;

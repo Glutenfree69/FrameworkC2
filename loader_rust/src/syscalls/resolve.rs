@@ -84,7 +84,6 @@ fn get_module_addr(hash: ULONG) -> PVOID {
 
 /// Trouver l'adresse d'une fonction par son hash dans l'export table
 fn get_function_addr(module_addr: PVOID, hash: u32) -> PVOID {
-    let dos_header: PIMAGE_DOS_HEADER;
     let nt_header: PIMAGE_NT_HEADERS;
     let data_dir: PIMAGE_DATA_DIRECTORY;
     let exp_dir: PIMAGE_EXPORT_DIRECTORY;
@@ -97,7 +96,7 @@ fn get_function_addr(module_addr: PVOID, hash: u32) -> PVOID {
     let name_list: &[u32];
     let ord_list: &[u16];
 
-    dos_header = module_addr as PIMAGE_DOS_HEADER;
+    let dos_header: PIMAGE_DOS_HEADER = module_addr as PIMAGE_DOS_HEADER;
 
     unsafe {
         nt_header = (dos_header as u64 + (*dos_header).e_lfanew as u64) as PIMAGE_NT_HEADERS;
@@ -133,24 +132,17 @@ fn get_function_addr(module_addr: PVOID, hash: u32) -> PVOID {
 /// Résoudre le SSN (System Service Number) et l'adresse du gadget "syscall; ret"
 /// Retourne (SSN, adresse_gadget)
 pub fn get_ssn(hash: u32) -> (u16, u64) {
-    let ntdll_addr: PVOID;
-    let funct_addr: PVOID;
-    let ssn_addr: u64;
-    let ssn: u16;
+    let ntdll_addr = get_module_addr(crate::obf!("ntdll.dll"));
+    let funct_addr = get_function_addr(ntdll_addr, hash);
 
-    ntdll_addr = get_module_addr(crate::obf!("ntdll.dll"));
-    funct_addr = get_function_addr(ntdll_addr, hash);
-
-    unsafe {
-        // Le SSN est à offset +4 dans le prologue de la fonction NT
-        // Bytecode typique:
-        //   mov r10, rcx    (4C 8B D1)
-        //   mov eax, SSN    (B8 XX 00 00 00)  <- SSN ici
-        ssn = *((funct_addr as u64 + 4) as *const u16);
-    }
+    // Le SSN est à offset +4 dans le prologue de la fonction NT
+    // Bytecode typique:
+    //   mov r10, rcx    (4C 8B D1)
+    //   mov eax, SSN    (B8 XX 00 00 00)  <- SSN ici
+    let ssn = unsafe { *((funct_addr as u64 + 4) as *const u16) };
 
     // Le gadget "syscall; ret" est généralement à offset +0x12
-    ssn_addr = funct_addr as u64 + 0x12;
+    let ssn_addr = funct_addr as u64 + 0x12;
 
     (ssn, ssn_addr)
 }
