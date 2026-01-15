@@ -794,7 +794,7 @@ fn main() {
             offset
         }
         Err(_e) => {
-            debug_eprintln!("[✗] Failed to parse DLL: {}", e);
+            debug_eprintln!("[✗] Failed to parse DLL: {}", _e);
             std::process::exit(1);
         }
     };
@@ -826,7 +826,7 @@ fn main() {
             debug_println!("════════════════════════════════════════════");
         }
         Err(_e) => {
-            debug_eprintln!("\n[✗] ERROR: {}", e);
+            debug_eprintln!("\n[✗] ERROR: {}", _e);
             std::process::exit(1);
         }
     }

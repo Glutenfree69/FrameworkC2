@@ -3,9 +3,7 @@
 ## Compilation
 
 ```bash
-# Prérequis
-rustup install nightly
-rustup default nightly
+# Prérequis (une seule fois)
 rustup target add x86_64-pc-windows-gnu
 
 # Build

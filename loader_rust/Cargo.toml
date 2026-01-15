@@ -5,9 +5,6 @@ edition = "2021"
 authors = ["Educational Purpose"]
 description = "Educational shellcode loader using indirect syscalls + reflective dll injection"
 
-# Utilise Rust nightly pour certaines features
-# rustup default nightly
-
 [dependencies]
 # Types NT (structures système)
 ntapi = "0.4"
