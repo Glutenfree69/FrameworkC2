@@ -1,5 +1,12 @@
 # 🎯 Reflective DLL Injection - Documentation
 
+```bash
+x86_64-w64-mingw32-g++ -shared -o evil.dll evil.cpp ReflectiveLdr.cpp \
+      -Wl,--export-all-symbols \
+      -static \
+      -luser32
+```
+
 ## Vue d'ensemble
 
 Ce projet implémente une **Reflective DLL Injection** basée sur [ReflectiveLdr](https://github.com/rokups/ReflectiveLdr) de rokups, elle-même basée sur le travail original de [Stephen Fewer](https://github.com/stephenfewer/ReflectiveDLLInjection).
