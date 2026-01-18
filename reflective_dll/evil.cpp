@@ -10,8 +10,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     if (reason == DLL_PROCESS_ATTACH)
     {
         MessageBoxA(NULL,
-                   "Reflective DLL injection successful!\nDllMain executed in RuntimeBroker.exe",
-                   "PWNED!",
+                   "I am Russian",
+                   "Blyat",
                    MB_OK | MB_ICONINFORMATION);
     }
     return TRUE;

