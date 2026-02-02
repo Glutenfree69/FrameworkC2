@@ -1,6 +1,0 @@
-[target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
-
-[build]
-# Force Windows target by default (required - this lib is Windows-only)
-target = "x86_64-pc-windows-gnu"
