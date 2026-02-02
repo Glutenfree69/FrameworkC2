@@ -81,7 +81,7 @@ impl Command {
             } else {
                 "loaddll".len()
             };
-            
+
             let dll_name = content[prefix_len..].trim().to_string();
             return Command::LoadDll(dll_name);
         }

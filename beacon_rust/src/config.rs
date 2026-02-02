@@ -64,7 +64,7 @@ impl Config {
     pub fn load() -> Result<Self> {
         toml::from_str(EMBEDDED_CONFIG).map_err(BeaconError::from)
     }
-    
+
     /// Get XOR key as bytes
     pub fn get_xor_key(&self) -> Vec<u8> {
         hex_decode(&self.crypto.xor_key).unwrap_or_else(|_| vec![0x41])
@@ -76,7 +76,7 @@ fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, &'static str> {
     if s.len() % 2 != 0 {
         return Err("Invalid hex string length");
     }
-    
+
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| "Invalid hex character"))
