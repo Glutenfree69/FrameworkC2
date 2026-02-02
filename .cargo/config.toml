@@ -1,0 +1,15 @@
+# Configuration Cargo pour cross-compilation Windows depuis macOS
+# Usage: cargo build --release --target x86_64-pc-windows-gnu
+
+[build]
+# Target par défaut pour ce workspace (Windows x64)
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+# Linker MinGW (installé via brew install mingw-w64)
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+
+[target.x86_64-pc-windows-msvc]
+# Alternative avec MSVC (si sur Windows)
+# Pas de config spéciale nécessaire

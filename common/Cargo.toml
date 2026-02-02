@@ -1,0 +1,28 @@
+[package]
+name = "c2_common"
+version = "0.1.0"
+edition = "2021"
+description = "Shared library for C2 framework - syscalls, PE parsing, obfuscation"
+
+[lib]
+name = "c2_common"
+path = "src/lib.rs"
+
+[dependencies]
+# Types NT (structures système)
+ntapi = "0.4"
+
+# Types C basiques
+libc = "0.2"
+
+# Winapi pour types PE, NT et memory management
+winapi = { version = "0.3.9", features = [
+    "ntdef", 
+    "winnt", 
+    "minwindef", 
+    "ntstatus",
+    "libloaderapi",
+    "errhandlingapi",
+    "memoryapi",
+    "processthreadsapi",
+] }

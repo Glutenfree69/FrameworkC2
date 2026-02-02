@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "common",
+    "loader",
+    "beacon_rust",
+    # "beacon",  # C beacon (legacy)
+]
+
+# Profil release partagé par tous les membres
+[profile.release]
+opt-level = "z"      # Optimise pour la taille
+lto = true           # Link Time Optimization
+panic = "abort"      # Pas de stack unwinding
+strip = true         # Strip symbols
+codegen-units = 1    # + petit, + optimisé
