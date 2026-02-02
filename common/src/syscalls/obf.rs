@@ -40,7 +40,7 @@ macro_rules! obf_str {
         const INPUT: &[u8] = $s.as_bytes();
         const LEN: usize = INPUT.len();
         const ENCRYPTED: [u8; LEN] = $crate::syscalls::obf::xor_encrypt::<LEN>(INPUT);
-        
+
         // Déchiffrement au runtime
         String::from_utf8_lossy(&$crate::syscalls::obf::xor_decrypt(&ENCRYPTED)).into_owned()
     }};

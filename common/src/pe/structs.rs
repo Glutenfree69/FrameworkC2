@@ -7,8 +7,6 @@
 //! - Microsoft PE/COFF Specification
 //! - https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
 
-#![allow(dead_code)]
-
 // ============================================================
 // CONSTANTES
 // ============================================================
@@ -30,8 +28,8 @@ pub const IMAGE_FILE_MACHINE_AMD64: u16 = 0x8664;
 pub const IMAGE_FILE_MACHINE_I386: u16 = 0x014C;
 
 // DLL Characteristics
-pub const IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE: u16 = 0x0040;  // ASLR
-pub const IMAGE_DLLCHARACTERISTICS_NX_COMPAT: u16 = 0x0100;     // DEP
+pub const IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE: u16 = 0x0040; // ASLR
+pub const IMAGE_DLLCHARACTERISTICS_NX_COMPAT: u16 = 0x0100; // DEP
 pub const IMAGE_DLLCHARACTERISTICS_NO_SEH: u16 = 0x0400;
 
 // Section characteristics
@@ -283,33 +281,33 @@ impl SectionHeader {
         let end = self.name.iter().position(|&c| c == 0).unwrap_or(8);
         std::str::from_utf8(&self.name[..end]).unwrap_or("<invalid>")
     }
-    
+
     /// Vérifie si la section contient du code
     pub fn is_code(&self) -> bool {
         self.characteristics & IMAGE_SCN_CNT_CODE != 0
     }
-    
+
     /// Vérifie si la section est exécutable
     pub fn is_executable(&self) -> bool {
         self.characteristics & IMAGE_SCN_MEM_EXECUTE != 0
     }
-    
+
     /// Vérifie si la section est writable
     pub fn is_writable(&self) -> bool {
         self.characteristics & IMAGE_SCN_MEM_WRITE != 0
     }
-    
+
     /// Vérifie si la section est readable
     pub fn is_readable(&self) -> bool {
         self.characteristics & IMAGE_SCN_MEM_READ != 0
     }
-    
+
     /// Convertit les caractéristiques en protection mémoire Windows
     pub fn to_protection(&self) -> u32 {
         let exec = self.characteristics & IMAGE_SCN_MEM_EXECUTE != 0;
         let read = self.characteristics & IMAGE_SCN_MEM_READ != 0;
         let write = self.characteristics & IMAGE_SCN_MEM_WRITE != 0;
-        
+
         match (exec, read, write) {
             (true, true, true) => PAGE_EXECUTE_READWRITE,
             (true, true, false) => PAGE_EXECUTE_READ,
@@ -431,7 +429,7 @@ impl RelocationEntry {
     pub fn offset(&self) -> u16 {
         self.0 & 0x0FFF
     }
-    
+
     /// Type de relocation
     pub fn reloc_type(&self) -> u16 {
         self.0 >> 12

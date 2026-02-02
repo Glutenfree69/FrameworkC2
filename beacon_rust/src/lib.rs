@@ -8,6 +8,10 @@
 //!
 //! FOR EDUCATIONAL/RESEARCH PURPOSES ONLY
 
+// Note: On autorise le dead_code car c'est une DLL dont le point d'entrée (DllMain)
+// est appelé par Windows. Certaines fonctions peuvent sembler inutilisées du point
+// de vue du compilateur Rust, mais sont en réalité appelées via l'API Windows ou
+// conditionnellement selon la plateforme.
 #![allow(dead_code)]
 
 mod commands;

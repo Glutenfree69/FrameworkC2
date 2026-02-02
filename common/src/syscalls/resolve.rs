@@ -21,6 +21,18 @@ use winapi::um::winnt::{
 use crate::syscalls::obf::djb2_hash;
 
 /// Lire un qword depuis le segment GS (x64)
+///
+/// # Safety
+///
+/// Cette fonction est unsafe car elle effectue une lecture directe de mémoire
+/// depuis le segment GS du processeur. L'appelant doit s'assurer que :
+///
+/// - `offset` pointe vers une adresse valide dans le segment GS
+/// - L'offset est aligné sur 8 octets (pour une lecture de qword)
+/// - Le code s'exécute en mode x86_64 avec un segment GS valide (configuré par Windows)
+///
+/// En pratique, cette fonction est sûre lorsqu'utilisée avec des offsets connus
+/// du TEB (Thread Environment Block) comme `NT_TIB::_Self`.
 #[cfg(target_arch = "x86_64")]
 pub unsafe fn __readgsqword(offset: u32) -> u64 {
     let out: u64;
@@ -33,14 +45,47 @@ pub unsafe fn __readgsqword(offset: u32) -> u64 {
     out
 }
 
-/// Obtenir le TEB (Thread Environment Block)
+/// Obtenir le TEB (Thread Environment Block) du thread courant.
+///
+/// # Safety
+///
+/// Cette fonction est unsafe car elle :
+///
+/// - Accède directement au segment GS pour lire l'adresse du TEB
+/// - Retourne un pointeur brut vers une structure système
+///
+/// L'appelant doit s'assurer que :
+///
+/// - Le code s'exécute sur Windows en mode x86_64
+/// - Le pointeur retourné n'est pas déréférencé après que le thread ait terminé
+/// - Les accès au TEB sont synchronisés si partagés entre threads (bien que chaque
+///   thread ait son propre TEB)
+///
+/// Le pointeur retourné est valide pour la durée de vie du thread courant.
 pub unsafe fn nt_current_teb() -> *mut TEB {
     use winapi::um::winnt::NT_TIB;
     let teb_offset = FIELD_OFFSET!(NT_TIB, _Self) as u32;
     __readgsqword(teb_offset) as *mut TEB
 }
 
-/// Obtenir le PEB (Process Environment Block)
+/// Obtenir le PEB (Process Environment Block) du processus courant.
+///
+/// # Safety
+///
+/// Cette fonction est unsafe car elle :
+///
+/// - Appelle `nt_current_teb()` qui accède directement au segment GS
+/// - Déréférence le pointeur TEB pour accéder au champ `ProcessEnvironmentBlock`
+/// - Retourne un pointeur brut vers une structure système partagée
+///
+/// L'appelant doit s'assurer que :
+///
+/// - Le code s'exécute sur Windows en mode x86_64
+/// - Les modifications au PEB sont synchronisées car il est partagé entre tous
+///   les threads du processus
+/// - Le pointeur n'est pas utilisé après la terminaison du processus
+///
+/// Le pointeur retourné est valide pour la durée de vie du processus.
 pub unsafe fn nt_current_peb() -> PPEB {
     (*nt_current_teb()).ProcessEnvironmentBlock
 }

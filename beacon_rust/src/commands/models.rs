@@ -92,7 +92,6 @@ impl Command {
 
 /// Result of command execution
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum CommandResult {
     /// Command produced output that should be sent as a file
     FileOutput {

@@ -6,4 +6,3 @@ mod client;
 mod models;
 
 pub use client::DiscordClient;
-pub use models::*;
