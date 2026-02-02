@@ -1,0 +1,4 @@
+LIBRARY test_nocrt
+EXPORTS
+    DllMain
+    TestFunction
