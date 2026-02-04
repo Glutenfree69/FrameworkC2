@@ -191,42 +191,4 @@ UAC_RESULT UacBypassShellExec(
     return result;
 }
 
-/*
- * UacBypassCanAttempt
- * 
- * Quick check if UAC bypass might work:
- * - Must be admin (member of Administrators group)
- * - Must NOT be already elevated
- */
-BOOL UacBypassCanAttempt(void)
-{
-    BOOL isAdmin = FALSE;
-    BOOL isElevated = FALSE;
-    HANDLE hToken = NULL;
-    
-    // Check if we're in Administrators group
-    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
-    PSID AdministratorsGroup = NULL;
-    
-    if (AllocateAndInitializeSid(&NtAuthority, 2,
-            SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS,
-            0, 0, 0, 0, 0, 0, &AdministratorsGroup)) {
-        CheckTokenMembership(NULL, AdministratorsGroup, &isAdmin);
-        FreeSid(AdministratorsGroup);
-    }
-    
-    // Check if already elevated
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-        TOKEN_ELEVATION elevation;
-        DWORD cbSize = sizeof(elevation);
-        
-        if (GetTokenInformation(hToken, TokenElevation, &elevation, 
-                sizeof(elevation), &cbSize)) {
-            isElevated = elevation.TokenIsElevated;
-        }
-        CloseHandle(hToken);
-    }
-    
-    // Bypass works if we're admin but not elevated yet
-    return isAdmin && !isElevated;
-}
+

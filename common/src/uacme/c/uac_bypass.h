@@ -51,18 +51,6 @@ UAC_RESULT UacBypassShellExec(
     _In_     int nShow
 );
 
-/**
- * @brief Check if current process could potentially use UAC bypass
- * 
- * Returns TRUE if:
- * - Running as a member of Administrators group
- * - Process is NOT already elevated
- * - UAC is likely enabled (not 100% accurate check)
- * 
- * @return BOOL TRUE if bypass might work, FALSE otherwise
- */
-BOOL UacBypassCanAttempt(void);
-
 #ifdef __cplusplus
 }
 #endif

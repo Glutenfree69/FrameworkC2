@@ -82,14 +82,6 @@ extern "C" {
         lpDirectory: *const u16,
         nShow: c_int,
     ) -> c_int;
-
-    /// Check if UAC bypass can be attempted
-    /// 
-    /// Returns TRUE if:
-    /// - User is in Administrators group
-    /// - Process is NOT already elevated
-    /// - UAC is enabled
-    fn UacBypassCanAttempt() -> c_int;
 }
 
 /// Window show options for ShellExec
@@ -117,15 +109,6 @@ pub struct UacBypass;
 
 #[cfg(target_os = "windows")]
 impl UacBypass {
-    /// Check if the UAC bypass can be attempted on this system
-    /// 
-    /// # Returns
-    /// `true` if the current user is an administrator but not elevated,
-    /// meaning the bypass has a chance to work.
-    pub fn can_attempt() -> bool {
-        unsafe { UacBypassCanAttempt() != 0 }
-    }
-
     /// Execute a program with elevated privileges
     /// 
     /// # Arguments
@@ -219,10 +202,6 @@ pub struct UacBypass;
 
 #[cfg(not(target_os = "windows"))]
 impl UacBypass {
-    pub fn can_attempt() -> bool {
-        false
-    }
-
     pub fn shell_exec(
         _file: &str,
         _parameters: Option<&str>,

