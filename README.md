@@ -626,7 +626,7 @@ Set-MpPreference -SubmitSamplesConsent 0
 Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled, OnAccessProtectionEnabled, IsTamperProtected
 ```
 
-**doc** https://learn.microsoft.com/en-us/powershell/module/defender/set-mppreference?view=windowsserver2025-ps
+**Doc**: https://learn.microsoft.com/en-us/powershell/module/defender/set-mppreference?view=windowsserver2025-ps
 
 **Note**: The beacon prevents loading the same DLL twice (detected via DJB2 hash).
 
