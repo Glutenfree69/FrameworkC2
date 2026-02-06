@@ -139,13 +139,13 @@ impl UacBypass {
     ) -> Result<(), UacResult> {
         let file_wide = to_wide_string(file);
 
-        let params_wide = parameters.map(|p| to_wide_string(p));
+        let params_wide = parameters.map(to_wide_string);
         let params_ptr = params_wide
             .as_ref()
             .map(|v| v.as_ptr())
             .unwrap_or(std::ptr::null());
 
-        let dir_wide = directory.map(|d| to_wide_string(d));
+        let dir_wide = directory.map(to_wide_string);
         let dir_ptr = dir_wide
             .as_ref()
             .map(|v| v.as_ptr())

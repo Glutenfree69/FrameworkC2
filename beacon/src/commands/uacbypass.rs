@@ -9,7 +9,7 @@ use super::CommandResult;
 ///
 /// # Arguments
 /// * `command` - Optional command to execute with elevated privileges
-///               If empty, spawns an elevated powershell.exe
+///   If empty, spawns an elevated powershell.exe
 ///
 /// # Returns
 /// CommandResult with success/error message
