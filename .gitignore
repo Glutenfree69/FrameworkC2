@@ -34,3 +34,6 @@ desktop.ini
 
 #Payload
 Pacpac/include/payload.h
+
+#Python
+.venv/
