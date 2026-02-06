@@ -17,8 +17,16 @@ Educational C2 (Command & Control) framework in Rust demonstrating:
 - `common/` - Shared library (c2_common): PE loader, syscalls, obfuscation
 - `beacon_rust/` - Beacon DLL: Discord client, commands (shell, screenshot, loaddll)
 - `loader/` - Initial loader EXE: Injects beacon into explorer.exe
+- `Pacpac/` - C packer/stub: Decrypts and memory-maps a Rust loader DLL without disk I/O
 - `test_dll/` - Test DLLs for PE loader validation
 - `tools/` - Helper scripts (xor_encrypt.py)
+
+## Pacpac (C Packer)
+- **Purpose**: No-CRT C stub that decrypts and manually maps a Rust DLL in-process
+- **Flow**: `stub.exe → ChaCha20 decrypt → manual PE map → call Run()`
+- **Tech**: Pure C, no-CRT, MinGW cross-compilation, ChaCha20 (RFC 7539), PEB walking + DJB2 hashing
+- **Build**: `make` (MinGW from macOS) or `build.bat` (MSVC on Windows)
+- **Structure**: `include/` (headers), `src/` (entry.c, peb.c, utils.c, chacha20.c, pe_loader.c)
 
 ## Key Commands
 ```bash

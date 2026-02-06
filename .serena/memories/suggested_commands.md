@@ -61,6 +61,21 @@ x86_64-w64-mingw32-objdump -d file.dll | grep -A 30 "entry_address:"
 x86_64-w64-mingw32-objdump -x file.dll | grep -E "ImageBase|BASERELOC"
 ```
 
+## Pacpac Build Commands
+
+```bash
+# Build Pacpac stub (MinGW cross-compilation from macOS)
+cd Pacpac && make
+
+# Clean Pacpac build
+cd Pacpac && make clean
+
+# Pacpac PE analysis
+x86_64-w64-mingw32-objdump -h Pacpac/stub.exe        # Show PE sections
+x86_64-w64-mingw32-objdump -x Pacpac/stub.exe        # Full PE dump (imports, exports)
+x86_64-w64-mingw32-strings Pacpac/stub.exe            # Check for leaked strings
+```
+
 ## Git Commands
 
 ```bash

@@ -8,6 +8,11 @@ description = "Initial loader - injects beacon into target process"
 name = "WinUpdateHelper"
 path = "src/main.rs"
 
+[lib]
+name = "loader"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # Bibliothèque commune (syscalls, PE parsing, PE loading)
 c2_common = { path = "../common" }
