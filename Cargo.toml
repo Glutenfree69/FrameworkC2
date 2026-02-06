@@ -3,8 +3,7 @@ resolver = "2"
 members = [
     "common",
     "loader",
-    "beacon_rust",
-    # "beacon",  # C beacon (legacy)
+    "beacon",
 ]
 
 # Profil release partagé par tous les membres
