@@ -113,8 +113,8 @@ def generate_payload_h(encrypted_data, key, nonce, original_size, compressed_siz
 def main():
     parser = argparse.ArgumentParser(description="Pacpac packer — LZ4 + ChaCha20")
     parser.add_argument("input", help="Input file to pack (e.g. loader.dll)")
-    parser.add_argument("-o", "--output", default="../include/payload.h",
-                        help="Output header path (default: ../include/payload.h)")
+    parser.add_argument("-o", "--output", default="include/payload.h",
+                        help="Output header path (default: include/payload.h)")
     parser.add_argument("--key", help="ChaCha20 key as hex (64 hex chars). Random if omitted.")
     parser.add_argument("--nonce", help="ChaCha20 nonce as hex (24 hex chars). Random if omitted.")
     args = parser.parse_args()
