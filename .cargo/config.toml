@@ -9,7 +9,3 @@ target = "x86_64-pc-windows-gnu"
 # Linker MinGW (installé via brew install mingw-w64)
 linker = "x86_64-w64-mingw32-gcc"
 ar = "x86_64-w64-mingw32-ar"
-
-[target.x86_64-pc-windows-msvc]
-# Alternative avec MSVC (si sur Windows)
-# Pas de config spéciale nécessaire

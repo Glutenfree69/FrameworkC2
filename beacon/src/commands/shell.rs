@@ -4,16 +4,12 @@
 
 use super::CommandResult;
 use std::os::windows::process::CommandExt;
-
-#[cfg(windows)]
 use std::process::Command;
-#[cfg(windows)]
 use uuid::Uuid;
 
 const CREATE_NO_WINDOWS: u32 = 0x08000000;
 
-/// Execute a shell command via PowerShell (Windows only)
-#[cfg(windows)]
+/// Execute a shell command via PowerShell
 pub fn execute_shell_command(cmd: &str) -> CommandResult {
     // Build the PowerShell command with UTF-8 encoding prefix
     let ps_command = format!("$OutputEncoding = [System.Text.Encoding]::UTF8; {}", cmd);
@@ -55,10 +51,4 @@ pub fn execute_shell_command(cmd: &str) -> CommandResult {
         }
         Err(e) => CommandResult::Error(format!("Failed to execute command: {}", e)),
     }
-}
-
-/// Stub for non-Windows platforms
-#[cfg(not(windows))]
-pub fn execute_shell_command(_cmd: &str) -> CommandResult {
-    CommandResult::Error("Shell commands are only supported on Windows".to_string())
 }

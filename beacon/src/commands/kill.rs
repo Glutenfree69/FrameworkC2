@@ -10,7 +10,6 @@
 /// 3. Terminates the calling thread
 ///
 /// This function never returns.
-#[cfg(windows)]
 pub fn execute_kill() -> ! {
     use std::ffi::c_void;
     use winapi::um::libloaderapi::{FreeLibraryAndExitThread, GetModuleHandleExW};
@@ -40,10 +39,4 @@ pub fn execute_kill() -> ! {
         // without generating any additional code.
         std::hint::unreachable_unchecked()
     }
-}
-
-/// Non-Windows fallback - simply exit the process
-#[cfg(not(windows))]
-pub fn execute_kill() -> ! {
-    std::process::exit(0);
 }

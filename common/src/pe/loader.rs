@@ -86,7 +86,6 @@ pub struct PeLoader {
     /// La DLL a-t-elle été initialisée (DllMain appelé)?
     initialized: bool,
     /// Nombre d'entrées dans la table d'exceptions (pour RtlDeleteFunctionTable)
-    #[cfg(windows)]
     exception_table_size: u32,
 }
 
@@ -134,7 +133,6 @@ impl PeLoader {
         Self::protect_sections(&pe, base_address)?;
 
         // 8. Enregistrer la table d'exceptions (x64 SEH)
-        #[cfg(windows)]
         let exception_table_size = Self::register_exception_table(&pe, base_address)?;
 
         // 9. Appeler les TLS callbacks (si présents)
@@ -155,7 +153,6 @@ impl PeLoader {
             image_size,
             entry_point,
             initialized: false,
-            #[cfg(windows)]
             exception_table_size,
         };
 
@@ -455,7 +452,6 @@ impl PeLoader {
     /// Sur Windows x64, chaque module doit enregistrer sa table d'exceptions
     /// via RtlAddFunctionTable pour que le stack unwinding fonctionne correctement.
     /// Sans cela, toute exception (même implicite) crash le process.
-    #[cfg(windows)]
     unsafe fn register_exception_table(pe: &PeParser, base: *mut u8) -> Result<u32, LoadError> {
         use winapi::um::winnt::RUNTIME_FUNCTION;
 
@@ -489,14 +485,7 @@ impl PeLoader {
         Ok(entry_count)
     }
 
-    /// Stub pour non-Windows
-    #[cfg(not(windows))]
-    unsafe fn register_exception_table(_pe: &PeParser, _base: *mut u8) -> Result<u32, LoadError> {
-        Ok(0)
-    }
-
     /// Désenregistre la table d'exceptions
-    #[cfg(windows)]
     unsafe fn unregister_exception_table(base: *mut u8) {
         // On doit retrouver la table pour la supprimer
         // RtlDeleteFunctionTable prend un pointeur vers la première entrée
@@ -511,7 +500,6 @@ impl PeLoader {
     }
 
     /// Wrapper pour RtlAddFunctionTable
-    #[cfg(windows)]
     unsafe fn rtl_add_function_table(
         function_table: *mut winapi::um::winnt::RUNTIME_FUNCTION,
         entry_count: u32,
@@ -545,7 +533,6 @@ impl PeLoader {
     // ========================================================
 
     /// Wrapper pour VirtualAlloc
-    #[cfg(windows)]
     unsafe fn virtual_alloc(
         addr: *mut CVoid,
         size: usize,
@@ -557,31 +544,14 @@ impl PeLoader {
         VirtualAlloc(addr as *mut WinVoid, size, alloc_type, protect) as *mut CVoid
     }
 
-    #[cfg(not(windows))]
-    unsafe fn virtual_alloc(
-        _addr: *mut CVoid,
-        _size: usize,
-        _alloc_type: u32,
-        _protect: u32,
-    ) -> *mut CVoid {
-        ptr::null_mut()
-    }
-
     /// Wrapper pour VirtualFree
-    #[cfg(windows)]
     unsafe fn virtual_free(addr: *mut CVoid, size: usize, free_type: u32) -> bool {
         use winapi::ctypes::c_void as WinVoid;
         use winapi::um::memoryapi::VirtualFree;
         VirtualFree(addr as *mut WinVoid, size, free_type) != 0
     }
 
-    #[cfg(not(windows))]
-    unsafe fn virtual_free(_addr: *mut CVoid, _size: usize, _free_type: u32) -> bool {
-        false
-    }
-
     /// Wrapper pour VirtualProtect
-    #[cfg(windows)]
     unsafe fn virtual_protect(
         addr: *mut CVoid,
         size: usize,
@@ -593,18 +563,7 @@ impl PeLoader {
         VirtualProtect(addr as *mut WinVoid, size, new_protect, old_protect) != 0
     }
 
-    #[cfg(not(windows))]
-    unsafe fn virtual_protect(
-        _addr: *mut CVoid,
-        _size: usize,
-        _new_protect: u32,
-        _old_protect: *mut u32,
-    ) -> bool {
-        false
-    }
-
     /// Wrapper pour LoadLibraryA
-    #[cfg(windows)]
     unsafe fn load_library(name: &str) -> Result<*mut CVoid, LoadError> {
         use winapi::um::libloaderapi::LoadLibraryA;
 
@@ -618,13 +577,7 @@ impl PeLoader {
         Ok(handle as *mut CVoid)
     }
 
-    #[cfg(not(windows))]
-    unsafe fn load_library(name: &str) -> Result<*mut CVoid, LoadError> {
-        Err(LoadError::ModuleNotFound(name.to_string()))
-    }
-
     /// Wrapper pour GetProcAddress (par nom)
-    #[cfg(windows)]
     unsafe fn get_proc_address(module: *mut CVoid, name: &str) -> Result<*mut CVoid, LoadError> {
         use winapi::shared::minwindef::HMODULE;
         use winapi::um::libloaderapi::GetProcAddress;
@@ -645,16 +598,7 @@ impl PeLoader {
         Ok(addr as *mut CVoid)
     }
 
-    #[cfg(not(windows))]
-    unsafe fn get_proc_address(_module: *mut CVoid, name: &str) -> Result<*mut CVoid, LoadError> {
-        Err(LoadError::FunctionNotFound {
-            module: "unknown".to_string(),
-            function: name.to_string(),
-        })
-    }
-
     /// Wrapper pour GetProcAddress (par ordinal)
-    #[cfg(windows)]
     unsafe fn get_proc_address_ordinal(
         module: *mut CVoid,
         ordinal: u16,
@@ -671,17 +615,6 @@ impl PeLoader {
         }
 
         Ok(addr as *mut CVoid)
-    }
-
-    #[cfg(not(windows))]
-    unsafe fn get_proc_address_ordinal(
-        _module: *mut CVoid,
-        ordinal: u16,
-    ) -> Result<*mut CVoid, LoadError> {
-        Err(LoadError::FunctionNotFound {
-            module: "unknown".to_string(),
-            function: format!("Ordinal#{}", ordinal),
-        })
     }
 }
 

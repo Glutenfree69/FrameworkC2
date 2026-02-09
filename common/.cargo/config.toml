@@ -1,0 +1,5 @@
+# Default build configuration for c2_common
+# This library is Windows-only (PE loader, syscalls, etc.)
+
+[build]
+target = "x86_64-pc-windows-gnu"
