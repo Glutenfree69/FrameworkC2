@@ -3,11 +3,14 @@
 //! Executes commands via PowerShell on Windows.
 
 use super::CommandResult;
+use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 use std::process::Command;
 #[cfg(windows)]
 use uuid::Uuid;
+
+const CREATE_NO_WINDOWS: u32 = 0x08000000;
 
 /// Execute a shell command via PowerShell (Windows only)
 #[cfg(windows)]
@@ -18,6 +21,7 @@ pub fn execute_shell_command(cmd: &str) -> CommandResult {
     // Execute via PowerShell
     let output = Command::new("powershell")
         .args(["-Command", &ps_command])
+        .creation_flags(CREATE_NO_WINDOWS)
         .output();
 
     match output {

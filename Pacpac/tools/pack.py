@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+        #!/usr/bin/env python3
 """
 pack.py — Packer script pour Pacpac
 Pipeline: input_file → LZ4 compress → ChaCha20 encrypt → include/payload.h
