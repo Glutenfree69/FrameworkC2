@@ -14,7 +14,7 @@ LDFLAGS = -nostdlib -Wl,-eEntry -Wl,--no-seh \
           -Wl,-s -Wl,--subsystem,console
 
 SRCS    = src/entry.c src/peb.c src/utils.c src/chacha20.c src/lz4.c src/tls.c src/loader.c
-OUT     = stub.exe
+OUT     = ../stub.exe
 
 all: $(OUT)
 
