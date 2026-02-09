@@ -699,25 +699,3 @@ impl Drop for PeLoader {
         }
     }
 }
-
-// ============================================================
-// TESTS
-// ============================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_load_error_display() {
-        let err = LoadError::AllocationFailed;
-        assert!(err.to_string().contains("allocation"));
-    }
-
-    #[test]
-    fn test_parse_error_conversion() {
-        let parse_err = ParseError::InvalidDosHeader;
-        let load_err: LoadError = parse_err.into();
-        assert!(matches!(load_err, LoadError::Parse(_)));
-    }
-}

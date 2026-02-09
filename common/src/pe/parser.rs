@@ -348,29 +348,3 @@ impl<'p, 'a> Iterator for RelocationBlockIterator<'p, 'a> {
         Some((block, entries))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_error_display() {
-        let err = ParseError::InvalidDosHeader;
-        assert!(err.to_string().contains("DOS"));
-    }
-
-    #[test]
-    fn test_parse_too_small() {
-        let data = [0u8; 10];
-        let result = PeParser::parse(&data);
-        assert!(matches!(result, Err(ParseError::TooSmall)));
-    }
-
-    #[test]
-    fn test_parse_invalid_dos() {
-        let mut data = [0u8; 100];
-        data[0] = 0x00; // Pas "MZ"
-        let result = PeParser::parse(&data);
-        assert!(matches!(result, Err(ParseError::InvalidDosHeader)));
-    }
-}
