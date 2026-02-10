@@ -1,3 +1,4 @@
+```mermaid
 flowchart TB
     %% --- Styles ---
     classDef disk fill:#eee,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
@@ -141,3 +142,4 @@ flowchart TB
 
     %% --- Initial Flow ---
     PackedBinary -.->|"Double-clic / Exécution"| StartC
+```
