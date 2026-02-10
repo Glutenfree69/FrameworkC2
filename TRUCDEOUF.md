@@ -1,7 +1,8 @@
 ```mermaid
 flowchart TB
     %% --- Styles ---
-    classDef disk fill:#eee,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
+    %% Correction contraste: gris plus foncé pour le disque
+    classDef disk fill:#d9d9d9,stroke:#555,stroke-width:3px,stroke-dasharray: 8 8;
     classDef cPacker fill:#ffcccc,stroke:#cc0000,stroke-width:2px;
     classDef rustLoader fill:#fff2cc,stroke:#d6b656,stroke-width:2px;
     classDef targetProcess fill:#d5e8d4,stroke:#82b366,stroke-width:2px;
@@ -9,11 +10,9 @@ flowchart TB
     classDef data fill:#f8cecc,stroke:#b85450,stroke-dasharray: 3 3;
 
     %% --- C2 Infrastructure (Top Layer) ---
-    subgraph C2_Infra ["🌐 Infrastructure C2 & Opérateur"]
+    subgraph C2_Infra ["🌐 Infrastructure C2"]
         direction LR
-        Operator["👤 Opérateur"]
-        DiscordAPI["💬 Discord API (v10)\n(HTTPS / TLS)"]
-        Operator <-->|"Commandes (shell, scr, !loaddll) / Résultats"| DiscordAPI
+        Operator["👤 Opérateur"] <-->|"Commandes / Résultats"| DiscordAPI["💬 Discord API (v10)\n(HTTPS / TLS)"]
     end
     class C2_Infra c2
 
@@ -21,78 +20,64 @@ flowchart TB
     subgraph TargetMachine ["💻 Machine Cible (Windows x64)"]
         direction TB
 
-        %% --- Stage 0: On Disk ---
-        subgraph Disk ["💾 Sur Disque"]
-            PackedBinary["📦 Packed Binary.exe\n(Point d'entrée initial)"]:::disk
-            subgraph BinaryContents ["Contenu du Binaire"]
-                CStub["🛠️ Stub Packer C\n(Pure C, No-CRT)"]:::cPacker
-                EncryptedRustLoader["🔒 Payload Chiffré/Compressé\n(contient loader.exe Rust)"]:::data
+        %% --- Stage 0: On Disk (CORRIGÉ: Contraste et type de payload) ---
+        subgraph Disk ["💾 Sur Disque (Stockage Passif)"]
+            PackedBinary["📦 Packed Binary.exe\n(L'exécutable hôte en C)"]:::disk
+            subgraph BinaryContents ["Contenu interne"]
+                CStub["🛠️ Code du Packer C\n(Pure C, No-CRT)"]:::cPacker
+                EncryptedRustPayload["🔒 Payload Rust Chiffré\n(C'est le loader.dll)"]:::data
             end
         end
 
         %% --- Stage 1 & 2: Initial Execution Process ---
-        subgraph InitialProcess ["⚙️ Processus Initial (RAM)"]
+        subgraph InitialProcess ["⚙️ Processus du Packer (RAM)"]
             direction TB
 
-            %% --- Stage 1: C Packer Execution ---
-            subgraph Stage1_CPacker ["Phase 1 : Exécution du Packer C (No-CRT)"]
+            %% --- Stage 1: C Packer Execution (CORRIGÉ: Chargement de DLL) ---
+            subgraph Stage1_CPacker ["Phase 1 : Exécution du Packer C Hôte"]
                 direction TB
-                StartC["▶️ Démarrage du Stub C"]
-                PEBWalk["🚶‍♂️ Walking PEB -> Ldr -> InLoadOrder\n(Trouver kernel32/ntdll sans import)"]
-                ResolveAPIs["🔍 Résolution Manuelle d'APIs\n(par hachage de noms)"]
-                DecryptDecompress["🔓 Déchiffrement & Décompression\ndu Payload Rust"]
-                ManualMapLocal["🗺️ Manual Mapping Local\n(Map sections du PE Rust en mémoire)"]
-                HandleTLS["⚙️ Exécution Manuelle TLS Callbacks\n(Crucial pour init runtime Rust)"]
-                JmpEntryPoint["↪️ JMP vers EntryPoint Rust"]
+                StartC["▶️ Démarrage de l'EXE C (No-CRT)"]
+                PEBWalk["🚶‍♂️ Walking PEB -> Ldr\n(Trouver kernel32/ntdll)"]
+                ResolveAPIs["🔍 Résolution APIs par hash"]
+                DecryptDecompress["🔓 Déchiffrement du payload DLL"]
+                ManualMapLocal["🗺️ Reflective Loading Local\n(Mapping manuel de loader.dll)"]
+                HandleTLS["⚙️ Exécution TLS Callbacks\n(Init du runtime Rust de la DLL)"]
+                CallDllMain["▶️ Appel de DllMain(DLL_PROCESS_ATTACH)\n(Point d'entrée de la DLL Rust)"]
 
-                StartC --> PEBWalk --> ResolveAPIs --> DecryptDecompress --> ManualMapLocal --> HandleTLS --> JmpEntryPoint
+                StartC --> PEBWalk --> ResolveAPIs --> DecryptDecompress --> ManualMapLocal --> HandleTLS --> CallDllMain
             end
             class Stage1_CPacker cPacker
 
             %% --- Transition Link ---
-            JmpEntryPoint -.->|"Transfert d'exécution"| StartRust
+            CallDllMain ===>|"Le code Rust s'exécute dans le processus du packer"| StartRust
 
-            %% --- Stage 2: Rust Loader Execution ---
-            subgraph Stage2_RustLoader ["Phase 2 : Loader Rust Intermédiaire"]
+            %% --- Stage 2: Rust Loader Execution (La DLL chargée) ---
+            subgraph Stage2_RustLoader ["Phase 2 : loader.dll (Rust) en mémoire"]
                 direction TB
-                StartRust["▶️ Démarrage loader.exe (Rust)"]
-                noteLoader["Contient beacon.dll chiffré (XOR) en statique"]
+                StartRust["▶️ DllMain du Loader Rust actif"]
+                noteLoader["Contient beacon.dll chiffré (XOR) en data"]
                 
                 subgraph IndirectSyscalls ["🛡️ Mécanisme Indirect Syscalls"]
-                    ObfHash["#️⃣ Hachage DJB2 (Compile-time)"]
-                    ResolveSSN["🕵️ Résolution SSN via PEB/Ntdll"]
-                    AsmTrampoline["⚙️ Inline ASM (syscall; ret gadget)"]
-                    ObfHash --> ResolveSSN --> AsmTrampoline
+                    ObfHash["#️⃣ Hachage DJB2"] --> ResolveSSN["🕵️ Résolution SSN"] --> AsmTrampoline["⚙️ Inline ASM (syscall)"]
                 end
 
                 DecryptBeacon["🔓 Déchiffrement beacon.dll (XOR)"]
-                FindExplorer["🔎 Trouver PID explorer.exe\n(NtQuerySystemInformation)"]
-                RemoteMapping["🗺️ Remote Manual Mapping\n(Injection sans LoadLibrary)"]
+                FindExplorer["🔎 Trouver PID explorer.exe"]
+                RemoteMapping["🗺️ Remote Manual Mapping\n(Préparation de l'injection)"]
                 
                 subgraph RemoteMappingSteps ["Étapes Mapping Distant"]
-                    NtOpen["NtOpenProcess"]
-                    NtAlloc["NtAllocateVirtualMemory (Remote)"]
-                    MapSections["Écriture Headers/Sections (NtWrite)"]
-                    PatchRelocs["Patch Relocations (Delta Base)"]
-                    ResolveIATLocal["Résolution IAT (Locale -> Distante)"]
-                    NtProtect["NtProtectVirtualMemory (RX/RW)"]
-                    NtOpen --> NtAlloc --> MapSections --> PatchRelocs --> ResolveIATLocal --> NtProtect
+                    NtOpen["NtOpenProcess"] --> NtAlloc["NtAlloc (Remote)"] --> MapSections["Écriture Sections"] --> PatchRelocs["Patch Relocs/IAT"] --> NtProtect["NtProtect (RX/RW)"]
                 end
 
-                InjectThread["💉 Injection Trampoline & Thread\n(NtCreateThreadEx -> DllMain)"]
+                InjectThread["💉 NtCreateThreadEx\n(Injection du trampoline vers DllMain distant)"]
 
-                StartRust --> DecryptBeacon
-                DecryptBeacon --> FindExplorer --> IndirectSyscalls
-                IndirectSyscalls --> RemoteMapping
-                RemoteMapping --> RemoteMappingSteps
-                RemoteMappingSteps --> InjectThread
+                StartRust --> DecryptBeacon --> FindExplorer --> IndirectSyscalls --> RemoteMapping --> RemoteMappingSteps --> InjectThread
             end
             class Stage2_RustLoader rustLoader
         end
 
-
         %% --- Transition Link ---
-        InjectThread ===>|"Création de Thread Distant"| DllMainTrigger
+        InjectThread ===>|"Passage dans le processus cible"| DllMainTrigger
 
         %% --- Stage 3: Final Payload in Target Process ---
         subgraph TargetProc ["🎯 Processus Cible : explorer.exe (RAM)"]
@@ -100,46 +85,25 @@ flowchart TB
             
             subgraph InjectedBeacon ["✨ Injected beacon.dll (Rust)"]
                 direction TB
-                DllMainTrigger["▶️ DllMain (PROCESS_ATTACH)"]
-                SpawnWorker["🧵 Spawn Worker Thread"]
+                DllMainTrigger["▶️ DllMain (PROCESS_ATTACH)"] --> SpawnWorker["🧵 Spawn Worker Thread"]
 
                 subgraph Evasion ["🛡️ Evasion & Bypass"]
-                    SetupVEH["🛠️ Setup VEH (Vectored Exception Handler)"]
-                    SetHWBP["🎯 Set Hardware Breakpoints (Dr0-Dr3)\n(sur AmsiScanBuffer / NtTraceControl)"]
-                    CatchException["⚡ Interception EXCEPTION_SINGLE_STEP"]
-                    PatchRegs["🔧 Patch Registres (RAX=0 / RIP=RET)"]
-                    SetupVEH --> SetHWBP --> CatchException --> PatchRegs
+                    SetupVEH["🛠️ Setup VEH"] --> SetHWBP["🎯 Set HWBP (Dr0-Dr3)\n(Amsi/ETW)"] --> CatchException["⚡ Interception Exception"]
                 end
 
                 subgraph C2Loop ["🔄 Boucle C2 Discord"]
-                    Polling["⏲️ Polling GET /messages (5s)"]
-                    CmdParse["📥 Parsing Commande"]
-                    
-                    subgraph CommandEngine ["⚙️ Moteur de Commandes"]
-                        CmdShell[">_ shell (PowerShell)"]
-                        CmdScr["📷 scr (Screenshot Multi-mon)"]
-                        CmdLoadDll["🧩 !loaddll (PE Loader interne)"]
-                        CmdUac["🛡️ !uacbypass (CMSTPLUA)"]
-                    end
-                    
-                    CmdExec["⚡ Exécution & Capture Output"]
-                    ResultPost["📤 POST Résultat (JSON/Attachments)"]
-
-                    Polling --> CmdParse --> CommandEngine --> CmdExec --> ResultPost
-                    ResultPost -.->|"Attente prochain cycle"| Polling
+                    Polling["⏲️ Polling (5s)"] --> CmdParse["📥 Parsing"] --> CmdExec["⚡ Exécution"] --> ResultPost["📤 POST Résultat"]
+                    ResultPost -.-> Polling
                 end
 
-                DllMainTrigger --> SpawnWorker --> Evasion
-                SpawnWorker --> C2Loop
+                SpawnWorker --> Evasion --> C2Loop
             end
             class InjectedBeacon targetProcess
         end
     end
 
     %% --- Connections to C2 ---
-    Polling <-->|"Trafic HTTPS légitime"| DiscordAPI
-    ResultPost -->|"Upload résultats"| DiscordAPI
-
-    %% --- Initial Flow ---
-    PackedBinary -.->|"Double-clic / Exécution"| StartC
+    Polling <--> DiscordAPI
+    ResultPost --> DiscordAPI
+    PackedBinary -.->|"Exécution"| StartC
 ```
