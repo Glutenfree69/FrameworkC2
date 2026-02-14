@@ -4,6 +4,7 @@ members = [
     "common",
     "loader",
     "beacon",
+    "test_dll",
 ]
 
 # Profil release partagé par tous les membres

