@@ -312,7 +312,7 @@ impl SectionHeader {
             (true, true, true) => PAGE_EXECUTE_READWRITE,
             (true, true, false) => PAGE_EXECUTE_READ,
             (true, false, true) => PAGE_EXECUTE_WRITECOPY,
-            (true, false, false) => PAGE_EXECUTE,
+            (true, false, false) => PAGE_EXECUTE_READ, // Promote: EXECUTE-only is unusable (no read = crash on data access)
             (false, true, true) => PAGE_READWRITE,
             (false, true, false) => PAGE_READONLY,
             (false, false, true) => PAGE_WRITECOPY,

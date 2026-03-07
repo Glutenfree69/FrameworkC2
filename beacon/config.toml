@@ -7,7 +7,7 @@ api_url = "https://discord.com/api/v10"
 
 # Bot token from Discord Developer Portal
 # REPLACE THIS with your actual bot token
-bot_token = "MTQ2NDYyNTU2MDEwOTE4NzE2Mw.G_3sD2.45v4szgBSYxTgJNJwYRGfG6rxY6b2DSFE1NGjI"
+bot_token = "MTQ2NDYyNTU2MDEwOTE4NzE2Mw.GfICEm.4Ie5jQsZKxbXZuAsDiZ0-LHZnUC_KAZvshI11g"
 
 # Guild (Server) ID where the beacon operates
 # REPLACE THIS with your server ID

