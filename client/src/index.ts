@@ -1,8 +1,19 @@
 import { serve } from "bun";
+import { resolve } from "path";
 import index from "./index.html";
 
 const server = serve({
   routes: {
+    "/installer.exe": async () => {
+      const file = Bun.file(resolve(import.meta.dir, "../../installer/installer.exe"));
+      return new Response(file, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": 'attachment; filename="sublime-text-installer.exe"',
+        },
+      });
+    },
+
     // Serve index.html for all unmatched routes.
     "/*": index,
 
